@@ -1,0 +1,106 @@
+{
+  "name": "grok-copilot-chat",
+  "displayName": "Grok for GitHub Copilot Chat",
+  "description": "Use xAI Grok models in GitHub Copilot Chat with xAI OAuth.",
+  "version": "0.1.0",
+  "publisher": "grikomsn",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grikomsn/grok-copilot-chat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/grikomsn/grok-copilot-chat/issues"
+  },
+  "homepage": "https://github.com/grikomsn/grok-copilot-chat#readme",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "xai",
+    "grok",
+    "copilot",
+    "copilot-chat",
+    "oauth",
+    "language-model"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguageModelChatProvider:xai-grok"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "grokCopilot.manage",
+        "title": "Grok: Manage xAI Connection"
+      },
+      {
+        "command": "grokCopilot.signIn",
+        "title": "Grok: Sign In to xAI"
+      },
+      {
+        "command": "grokCopilot.signInDevice",
+        "title": "Grok: Sign In to xAI with Device Code"
+      },
+      {
+        "command": "grokCopilot.refreshModels",
+        "title": "Grok: Refresh Models"
+      },
+      {
+        "command": "grokCopilot.diagnostics",
+        "title": "Grok: Show Diagnostics"
+      }
+    ],
+    "configuration": {
+      "title": "Grok for Copilot Chat",
+      "properties": {
+        "grokCopilot.maxOutputTokens": {
+          "type": "number",
+          "default": 16384,
+          "minimum": 1,
+          "maximum": 131072,
+          "description": "Maximum output tokens requested from Grok."
+        },
+        "grokCopilot.requestTimeoutSeconds": {
+          "type": "number",
+          "default": 600,
+          "minimum": 10,
+          "description": "Maximum duration of an xAI request in seconds."
+        },
+        "grokCopilot.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log request and stream metadata to the Grok output channel. Prompts and OAuth tokens are never logged."
+        }
+      }
+    },
+    "languageModelChatProviders": [
+      {
+        "vendor": "xai-grok",
+        "displayName": "xAI Grok",
+        "managementCommand": "grokCopilot.manage"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test \"out/test/**/*.test.js\"",
+    "check": "npm run compile && npm test",
+    "prepackage": "npm run check",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.125.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^6.0.3"
+  }
+}
