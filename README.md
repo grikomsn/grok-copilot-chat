@@ -17,7 +17,11 @@ Use xAI Grok models directly in Visual Studio Code's GitHub Copilot Chat model p
 - GitHub Copilot Chat installed and signed in (a paid Copilot plan is not required for BYOK providers)
 - An xAI account with Grok API access or an eligible SuperGrok subscription
 
-## Install locally
+## Install
+
+Install [Grok for GitHub Copilot Chat from Visual Studio
+Marketplace](https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat),
+or package and install the extension locally:
 
 ```bash
 npm install
@@ -36,6 +40,16 @@ npm install
 npm test
 npm run package
 ```
+
+User-visible pull requests should include a Changeset:
+
+```bash
+npm run changeset
+```
+
+Changesets maintains a version pull request on `main`. Merging that pull
+request publishes the VSIX to Visual Studio Marketplace and attaches the same
+artifact to a GitHub release.
 
 The implementation follows the provider pattern used by [`ltmoerdani/opencode-copilot-chat`](https://github.com/ltmoerdani/opencode-copilot-chat) and the xAI OAuth flow implemented by [OpenCode](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/xai.ts).
 

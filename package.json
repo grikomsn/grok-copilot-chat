@@ -93,11 +93,15 @@
     "watch": "tsc -watch -p ./",
     "test": "npm run compile && node --test \"out/test/**/*.test.js\"",
     "check": "npm run compile && npm test",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "npm run check && vsce publish --skip-duplicate",
     "prepackage": "npm run check",
     "package": "vsce package",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",
