@@ -24,4 +24,4 @@ There is no local proxy or project-operated relay. Prompts, images, tool definit
 
 Debug logging is disabled by default. When enabled, the Grok output channel records request and stream metadata, model discovery, and errors; it does not intentionally log prompts or OAuth tokens.
 
-Report security issues privately to the repository owner rather than opening a public issue containing credentials or sensitive prompts.
+Report vulnerabilities according to the [security policy](https://github.com/grikomsn/grok-copilot-chat/security/policy) or email [security@nibras.co](mailto:security@nibras.co). Do not disclose credentials, sensitive prompts, or vulnerability details in a public issue.
