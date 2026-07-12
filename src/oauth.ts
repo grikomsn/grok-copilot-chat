@@ -111,7 +111,7 @@ export class XaiOAuth {
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.sleep = options.sleep ?? defaultSleep;
     this.now = options.now ?? Date.now;
-    this.userAgent = options.userAgent ?? "grok-copilot-chat/0.1.0 VSCode";
+    this.userAgent = options.userAgent ?? "grok-copilot-chat VSCode";
     this.deviceAuthorizationUrl = options.deviceAuthorizationUrl ?? DEVICE_AUTHORIZATION_URL;
     this.tokenUrl = options.tokenUrl ?? TOKEN_URL;
     this.authorizeUrl = options.authorizeUrl ?? AUTHORIZE_URL;

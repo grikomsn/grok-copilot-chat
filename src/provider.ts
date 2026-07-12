@@ -44,6 +44,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   constructor(
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
+    private readonly userAgent: string,
   ) {}
 
   fireDidChange(): void {
@@ -188,7 +189,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          "User-Agent": "grok-copilot-chat/0.1.0 VSCode",
+          "User-Agent": this.userAgent,
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,

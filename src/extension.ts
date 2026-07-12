@@ -7,7 +7,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const oauth = new XaiOAuth(context.secrets, {
     userAgent: `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
   });
-  const provider = new GrokProvider(oauth, output);
+  const provider = new GrokProvider(
+    oauth,
+    output,
+    `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
+  );
 
   context.subscriptions.push(
     output,

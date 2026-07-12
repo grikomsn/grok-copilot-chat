@@ -1,10 +1,13 @@
 .github/**
 .changeset/**
 .vscode/**
+docs/**
+assets/cover.jpg
 .gitignore
 src/**
 out/test/**
 **/*.map
+**/.DS_Store
 tsconfig.json
 package-lock.json
 *.vsix

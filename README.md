@@ -1,64 +1,40 @@
-# Grok for GitHub Copilot Chat
+<p align="center">
+  <img src="https://raw.githubusercontent.com/grikomsn/grok-copilot-chat/main/assets/cover.jpg" alt="Grok and GitHub Copilot" width="960">
+</p>
 
-Use xAI Grok models directly in Visual Studio Code's GitHub Copilot Chat model picker. The extension is a native `LanguageModelChatProvider`: it authenticates with xAI, calls `api.x.ai`, and streams Grok responses into Copilot Chat without running a local proxy.
+<h1 align="center">Grok for GitHub Copilot Chat</h1>
 
-## What works
+<p align="center">Use xAI Grok models directly from the GitHub Copilot Chat model picker in Visual Studio Code.</p>
 
-- xAI OAuth browser/PKCE and device-code sign-in (including refresh-token rotation)
-- Live model discovery from `GET https://api.x.ai/v1/models`
-- Streaming text and reasoning in Copilot Chat
-- Agent mode tool/function calls
-- Image inputs
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat"><img src="https://img.shields.io/visual-studio-marketplace/v/grikomsn.grok-copilot-chat?style=flat-square&logo=visualstudiocode&label=Marketplace" alt="Visual Studio Marketplace version"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat"><img src="https://img.shields.io/visual-studio-marketplace/i/grikomsn.grok-copilot-chat?style=flat-square&label=Installs" alt="Visual Studio Marketplace installs"></a>
+  <a href="https://github.com/grikomsn/grok-copilot-chat/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/grikomsn/grok-copilot-chat/ci.yml?branch=main&style=flat-square&label=CI" alt="CI status"></a>
+  <a href="https://github.com/grikomsn/grok-copilot-chat/blob/main/LICENSE"><img src="https://img.shields.io/github/license/grikomsn/grok-copilot-chat?style=flat-square" alt="MIT license"></a>
+</p>
+
+This extension is a native VS Code `LanguageModelChatProvider`. It authenticates with xAI, discovers available models, and streams responses from `api.x.ai` into Copilot Chat without a local proxy.
+
+## Highlights
+
+- Browser/PKCE and device-code xAI sign-in with token refresh
+- Live Grok model discovery
+- Streaming text and reasoning
+- Agent mode tool calls and image inputs
 - Usage and cost metadata when returned by xAI
 
-## Requirements
+## Quick start
 
-- Visual Studio Code 1.125 or newer
-- GitHub Copilot Chat installed and signed in (a paid Copilot plan is not required for BYOK providers)
-- An xAI account with Grok API access or an eligible SuperGrok subscription
+1. Install [Grok for GitHub Copilot Chat](https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat). You need VS Code 1.125 or newer, GitHub Copilot Chat, and an xAI account with API access or an eligible subscription.
+2. Run **Grok: Sign In to xAI** from the Command Palette and complete authorization in your browser. Use **Grok: Sign In to xAI with Device Code** if the browser callback is unavailable.
+3. Open Copilot Chat, select **Manage Models**, enable **xAI Grok**, then choose a Grok model.
 
-## Install
+Use **Grok: Manage xAI Connection** to test the connection, refresh models, inspect logs, or sign out.
 
-Install [Grok for GitHub Copilot Chat from Visual Studio
-Marketplace](https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat),
-or package and install the extension locally:
+## Documentation
 
-```bash
-npm install
-npm run package
-code --install-extension grok-copilot-chat-0.1.0.vsix --force
-```
+- [Setup, settings, and troubleshooting](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/setup.md)
+- [OAuth and security](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/security.md)
+- [Development and releases](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/development.md)
 
-Reload VS Code, run **Grok: Sign In to xAI**, and complete the browser authorization. If loopback callbacks are unavailable, use **Grok: Sign In to xAI with Device Code** instead. Then open Copilot Chat, choose **Manage Models**, enable **xAI Grok**, and pick a Grok model.
-
-Use **Grok: Manage xAI Connection** to test the connection, refresh models, view logs, or sign out.
-
-## Development
-
-```bash
-npm install
-npm test
-npm run package
-```
-
-User-visible pull requests should include a Changeset:
-
-```bash
-npm run changeset
-```
-
-Changesets maintains a version pull request on `main`. Merging that pull
-request publishes the VSIX to Visual Studio Marketplace and attaches the same
-artifact to a GitHub release.
-
-The implementation follows the provider pattern used by [`ltmoerdani/opencode-copilot-chat`](https://github.com/ltmoerdani/opencode-copilot-chat) and the xAI OAuth flow implemented by [OpenCode](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/xai.ts).
-
-## OAuth and security
-
-OAuth access and refresh tokens are stored only in VS Code SecretStorage. They are never written to settings or logs. The extension uses xAI's public Grok CLI OAuth client ID and RFC 8628 device authorization endpoints, matching OpenCode's implementation. API requests go directly to `https://api.x.ai` and authentication requests go directly to `https://auth.x.ai`.
-
-Your xAI subscription, API limits, and charges are governed by xAI. This project is unofficial and is not affiliated with xAI, GitHub, or Microsoft.
-
-## License
-
-MIT
+Unofficial project; not affiliated with xAI, GitHub, or Microsoft. xAI account limits and charges still apply. Licensed under [MIT](LICENSE).
