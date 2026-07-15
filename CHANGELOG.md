@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Patch Changes
+
+- 5540bfd: Fix VS Code context-window accounting, track exact xAI-billed spend and request tokens locally, and relabel response-header values as transient API rate capacity rather than account usage. Remove the inaccessible Grok-web limit probe and consolidate shared provider helpers.
+
 ## 0.2.0
 
 ### Minor Changes
