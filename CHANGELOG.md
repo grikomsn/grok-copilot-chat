@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+### Minor Changes
+
+- b6cfd2c: Show live remaining Grok query, request, and token limits in the VS Code status bar and a detailed usage view.
+
 ## 0.1.1
 
 - Add the branded Marketplace icon and repository cover.
