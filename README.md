@@ -22,6 +22,7 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 - Streaming text and reasoning
 - Agent mode tool calls and image inputs
 - Usage and cost metadata when returned by xAI
+- Live remaining query, request, and token limits in the VS Code status bar
 
 ## Quick start
 
@@ -29,7 +30,9 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 2. Run **Grok: Sign In to xAI** from the Command Palette and complete authorization in your browser. Use **Grok: Sign In to xAI with Device Code** if the browser callback is unavailable.
 3. Open Copilot Chat, select **Manage Models**, enable **xAI Grok**, then choose a Grok model.
 
-Use **Grok: Manage xAI Connection** to test the connection, refresh models, inspect logs, or sign out.
+Use **Grok: Show Usage Limits** or click the Grok status-bar item to refresh the remaining query/API limits. The details view links to Grok's account Usage page for the weekly allowance and Extra Usage Credits.
+
+Use **Grok: Manage xAI Connection** to inspect usage, test the connection, refresh models, inspect logs, or sign out.
 
 ## Documentation
 

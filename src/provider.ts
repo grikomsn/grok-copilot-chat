@@ -1,8 +1,15 @@
 import * as vscode from "vscode";
 import { XaiOAuth } from "./oauth";
 import { ChatCompletionStreamParser, type ChatStreamEvent } from "./sse";
+import {
+  mergeUsageSnapshot,
+  parseApiRateLimitHeaders,
+  parseGrokRateLimits,
+  type GrokUsageSnapshot,
+} from "./usage";
 
 const API_BASE = "https://api.x.ai/v1";
+const GROK_RATE_LIMITS_URL = "https://grok.com/rest/rate-limits";
 const FALLBACK_MODELS = [
   "grok-4.5",
   "grok-code-fast-1",
@@ -37,9 +44,12 @@ interface ApiToolCall {
 
 export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
+  private readonly usageEmitter = new vscode.EventEmitter<GrokUsageSnapshot>();
   readonly onDidChangeLanguageModelChatInformation = this.changeEmitter.event;
+  readonly onDidChangeUsage = this.usageEmitter.event;
   private models = [...FALLBACK_MODELS];
   private lastModelRefreshAt = 0;
+  private usage: GrokUsageSnapshot = {};
 
   constructor(
     private readonly oauth: XaiOAuth,
@@ -49,6 +59,15 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
 
   fireDidChange(): void {
     this.changeEmitter.fire();
+  }
+
+  getUsageSnapshot(): GrokUsageSnapshot {
+    return this.usage;
+  }
+
+  clearUsage(): void {
+    this.usage = {};
+    this.usageEmitter.fire(this.usage);
   }
 
   async refreshModels(): Promise<string[]> {
@@ -62,6 +81,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     const response = await fetch(`${API_BASE}/models`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     });
+    this.captureApiLimits(response.headers);
     if (!response.ok) throw await apiError("Unable to list xAI models", response);
     const body = (await response.json()) as { data?: Array<{ id?: string }> };
     const discovered = (body.data ?? [])
@@ -118,6 +138,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       accessToken = await this.oauth.getAccessToken(true);
       response = await this.sendRequest(accessToken, requestBody, token);
     }
+    this.captureApiLimits(response.headers);
     if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
     if (!response.body) throw new Error("xAI returned an empty response stream");
 
@@ -165,9 +186,47 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         stream: false,
       }),
     });
+    this.captureApiLimits(response.headers);
     if (!response.ok) throw await apiError("xAI connection test failed", response);
     const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return { model, text: body.choices?.[0]?.message?.content?.trim() ?? "(empty response)" };
+  }
+
+  async refreshUsage(): Promise<GrokUsageSnapshot> {
+    try {
+      await this.discoverModels();
+      this.updateUsage({ apiError: undefined, updatedAt: Date.now() });
+    } catch (error) {
+      const message = messageOf(error);
+      this.updateUsage({ apiError: message, updatedAt: Date.now() });
+      this.output.appendLine(`[usage] xAI API limit refresh unavailable: ${message}`);
+    }
+    try {
+      let accessToken = await this.oauth.getAccessToken();
+      let response = await this.fetchGrokRateLimits(accessToken);
+      if (response.status === 401) {
+        accessToken = await this.oauth.getAccessToken(true);
+        response = await this.fetchGrokRateLimits(accessToken);
+      }
+      if (response.ok) {
+        const limits = parseGrokRateLimits(await response.json());
+        if (Object.keys(limits).length) {
+          this.updateUsage({ ...limits, modelName: "fast", queryError: undefined, updatedAt: Date.now() });
+          this.output.appendLine("[usage] refreshed Grok query window");
+        }
+      } else {
+        const message = response.status === 403
+          ? "The Grok web query window requires a signed-in browser session and is not exposed to this xAI OAuth session."
+          : `The Grok query-window endpoint returned HTTP ${response.status}.`;
+        this.updateUsage({ queryError: message, updatedAt: Date.now() });
+        this.output.appendLine(`[usage] Grok query window unavailable (HTTP ${response.status}); using xAI API headers`);
+      }
+    } catch (error) {
+      const message = `Unable to check the Grok query window: ${messageOf(error)}`;
+      this.updateUsage({ queryError: message, updatedAt: Date.now() });
+      this.output.appendLine(`[usage] ${message}`);
+    }
+    return this.usage;
   }
 
   private async sendRequest(
@@ -198,6 +257,32 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       clearTimeout(timeout);
       listener.dispose();
     }
+  }
+
+  private fetchGrokRateLimits(accessToken: string): Promise<Response> {
+    return fetch(GROK_RATE_LIMITS_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": this.userAgent,
+      },
+      body: JSON.stringify({ modelName: "fast" }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  }
+
+  private captureApiLimits(headers: Headers): void {
+    const limits = parseApiRateLimitHeaders(headers);
+    if (limits.requests || limits.tokens) {
+      this.updateUsage({ ...limits, updatedAt: Date.now() });
+    }
+  }
+
+  private updateUsage(update: GrokUsageSnapshot): void {
+    this.usage = mergeUsageSnapshot(this.usage, update);
+    this.usageEmitter.fire(this.usage);
   }
 }
 

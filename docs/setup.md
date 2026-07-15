@@ -24,7 +24,11 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 | **Grok: Sign In to xAI** | Start browser/PKCE authorization |
 | **Grok: Sign In to xAI with Device Code** | Authorize without a loopback browser callback |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |
+| **Grok: Show Usage Limits** | Refresh and show remaining Grok query/API limits |
+| **Grok: Open Account Usage** | Open Grok's weekly allowance and credits page |
 | **Grok: Show Diagnostics** | Show the VS Code version, session state, and registered models |
+
+The status bar shows the last query window returned by Grok, or the latest request/token limits returned in xAI API headers. Click it for timestamps and source details. Weekly allowance, reset date, and Extra Usage Credits remain on Grok's account Usage page.
 
 ## Settings
 
