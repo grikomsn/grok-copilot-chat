@@ -4,10 +4,6 @@ export interface LimitBucket {
   resetsAt?: number;
 }
 
-export interface QueryWindow extends LimitBucket {
-  windowSizeSeconds?: number;
-}
-
 export interface ApiRequestUsage {
   modelId: string;
   recordedAt: number;
@@ -30,16 +26,11 @@ export interface TrackedApiUsage {
 }
 
 export interface GrokUsageSnapshot {
-  modelName?: string;
-  query?: QueryWindow;
-  lowEffort?: QueryWindow;
-  highEffort?: QueryWindow;
   requests?: LimitBucket;
   tokens?: LimitBucket;
   lastRequest?: ApiRequestUsage;
   tracked?: TrackedApiUsage;
   apiError?: string;
-  queryError?: string;
   updatedAt?: number;
 }
 
@@ -48,7 +39,7 @@ export interface HeaderReader {
 }
 
 export interface UsageDisplayRow {
-  kind: "spend" | "request" | "query" | "requests" | "tokens" | "warning" | "empty";
+  kind: "spend" | "request" | "requests" | "tokens" | "warning" | "empty";
   label: string;
   description: string;
   detail?: string;
@@ -61,24 +52,6 @@ export interface ProviderUsagePayload {
   prompt_tokens_details?: { cached_tokens: number };
   completion_tokens_details?: { reasoning_tokens: number };
   copilotCredits?: number;
-}
-
-interface GrokRateLimitsBody {
-  windowSizeSeconds?: unknown;
-  remainingQueries?: unknown;
-  totalQueries?: unknown;
-  lowEffortRateLimits?: unknown;
-  highEffortRateLimits?: unknown;
-}
-
-export function parseGrokRateLimits(value: unknown): Pick<GrokUsageSnapshot, "query" | "lowEffort" | "highEffort"> {
-  if (!isRecord(value)) return {};
-  const body = value as GrokRateLimitsBody;
-  return compactObject({
-    query: parseQueryWindow(body),
-    lowEffort: parseQueryWindow(body.lowEffortRateLimits),
-    highEffort: parseQueryWindow(body.highEffortRateLimits),
-  });
 }
 
 export function parseApiRateLimitHeaders(
@@ -98,9 +71,6 @@ export function mergeUsageSnapshot(
   return compactObject({
     ...current,
     ...update,
-    query: mergeBucket(current.query, update.query),
-    lowEffort: mergeBucket(current.lowEffort, update.lowEffort),
-    highEffort: mergeBucket(current.highEffort, update.highEffort),
     requests: mergeBucket(current.requests, update.requests),
     tokens: mergeBucket(current.tokens, update.tokens),
   });
@@ -140,7 +110,7 @@ export function toProviderUsagePayload(raw: Record<string, unknown>): ProviderUs
 }
 
 export function hasUsageLimits(snapshot: GrokUsageSnapshot): boolean {
-  return [snapshot.query, snapshot.lowEffort, snapshot.highEffort, snapshot.requests, snapshot.tokens]
+  return [snapshot.requests, snapshot.tokens]
     .some((bucket) => bucket && (bucket.limit !== undefined || bucket.remaining !== undefined));
 }
 
@@ -148,7 +118,7 @@ export function formatUsageStatusBar(snapshot: GrokUsageSnapshot): string {
   if (snapshot.tracked?.requests) {
     return `$(graph) Grok ${formatUsdTicks(snapshot.tracked.costUsdTicks)}`;
   }
-  const bucket = snapshot.query ?? snapshot.requests ?? snapshot.tokens;
+  const bucket = snapshot.requests ?? snapshot.tokens;
   if (!bucket || (bucket.remaining === undefined && bucket.limit === undefined)) {
     if (snapshot.apiError) return "$(warning) Grok API unavailable";
     return "$(pulse) Grok API";
@@ -163,10 +133,8 @@ export function formatUsageTooltip(snapshot: GrokUsageSnapshot, now = Date.now()
   if (snapshot.lastRequest) lines.push(`Last request: ${formatRequestUsage(snapshot.lastRequest)}`);
   if (snapshot.requests) lines.push(formatBucketLine("Request rate capacity", snapshot.requests, now));
   if (snapshot.tokens) lines.push(formatBucketLine("Token rate capacity", snapshot.tokens, now));
-  if (snapshot.query) lines.push(formatBucketLine("Grok web query window", snapshot.query, now));
   if (!hasUsageLimits(snapshot)) lines.push("No live limits observed yet");
   if (snapshot.apiError) lines.push("xAI API limits unavailable");
-  if (snapshot.queryError) lines.push("Grok web query limit unavailable to OAuth");
   if (snapshot.updatedAt) lines.push(`Updated ${new Date(snapshot.updatedAt).toLocaleString()}`);
   lines.push("Click for details");
   return lines.join("\n");
@@ -192,27 +160,6 @@ export function formatUsageRows(snapshot: GrokUsageSnapshot, now = Date.now()): 
   }
   if (snapshot.requests) rows.push(bucketRow("requests", "Request rate capacity", snapshot.requests, now));
   if (snapshot.tokens) rows.push(bucketRow("tokens", "Token rate capacity (TPM)", snapshot.tokens, now));
-  if (snapshot.query) {
-    const details = [
-      snapshot.query.windowSizeSeconds ? `Window: ${formatWindowDuration(snapshot.query.windowSizeSeconds * 1000)}` : undefined,
-      snapshot.modelName ? `Model group: ${snapshot.modelName}` : undefined,
-      snapshot.lowEffort ? `Low effort: ${bucketSummary(snapshot.lowEffort, now)}` : undefined,
-      snapshot.highEffort ? `High effort: ${bucketSummary(snapshot.highEffort, now)}` : undefined,
-    ].filter((value): value is string => Boolean(value));
-    rows.push({
-      kind: "query",
-      label: "Grok query window",
-      description: bucketSummary(snapshot.query, now),
-      ...(details.length ? { detail: details.join(" · ") } : {}),
-    });
-  } else if (snapshot.queryError) {
-    rows.push({
-      kind: "warning",
-      label: "Grok web query window",
-      description: "Browser session required",
-      detail: snapshot.queryError,
-    });
-  }
   if (snapshot.apiError) {
     rows.push({
       kind: "warning",
@@ -229,16 +176,6 @@ export function formatUsageRows(snapshot: GrokUsageSnapshot, now = Date.now()): 
     });
   }
   return rows;
-}
-
-function parseQueryWindow(value: unknown): QueryWindow | undefined {
-  if (!isRecord(value)) return undefined;
-  const window = compactObject({
-    limit: finiteNumber(value.totalQueries),
-    remaining: finiteNumber(value.remainingQueries),
-    windowSizeSeconds: finiteNumber(value.windowSizeSeconds),
-  });
-  return Object.keys(window).length ? window : undefined;
 }
 
 function parseHeaderBucket(headers: HeaderReader, kind: "requests" | "tokens" | undefined, now: number): LimitBucket | undefined {
@@ -365,13 +302,6 @@ function formatDuration(milliseconds: number): string {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return `in ${hours}h${remainder ? ` ${remainder}m` : ""}`;
-}
-
-function formatWindowDuration(milliseconds: number): string {
-  const minutes = Math.max(1, Math.round(milliseconds / 60_000));
-  if (minutes < 60) return `${minutes} minutes`;
-  const hours = minutes / 60;
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hours`;
 }
 
 function compactCount(value: number | undefined): string {

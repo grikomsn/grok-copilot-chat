@@ -1,17 +1,16 @@
 import * as vscode from "vscode";
+import { messageOf } from "./errors";
 import { XaiOAuth } from "./oauth";
 import { ChatCompletionStreamParser, type ChatStreamEvent } from "./sse";
 import {
   mergeUsageSnapshot,
   parseApiRateLimitHeaders,
-  parseGrokRateLimits,
   recordApiRequestUsage,
   toProviderUsagePayload,
   type GrokUsageSnapshot,
 } from "./usage";
 
 const API_BASE = "https://api.x.ai/v1";
-const GROK_RATE_LIMITS_URL = "https://grok.com/rest/rate-limits";
 const FALLBACK_MODELS = [
   "grok-4.5",
   "grok-code-fast-1",
@@ -53,6 +52,14 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private lastModelRefreshAt = 0;
   private usage: GrokUsageSnapshot;
 
+  private get configuration(): vscode.WorkspaceConfiguration {
+    return grokConfiguration();
+  }
+
+  private get debugLogging(): boolean {
+    return this.configuration.get("debugLogging", false);
+  }
+
   constructor(
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
@@ -71,8 +78,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 
   clearUsage(): void {
-    this.usage = {};
-    this.usageEmitter.fire(this.usage);
+    this.setAndEmitUsage({});
   }
 
   async refreshModels(): Promise<string[]> {
@@ -147,8 +153,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
     if (!response.body) throw new Error("xAI returned an empty response stream");
 
-    const debug = vscode.workspace.getConfiguration("grokCopilot").get("debugLogging", false);
-    if (debug) this.output.appendLine(`[request] model=${model.rawModelId} initiator=${options.requestInitiator ?? "unknown"}`);
+    if (this.debugLogging) this.output.appendLine(`[request] model=${model.rawModelId} initiator=${options.requestInitiator ?? "unknown"}`);
 
     const parser = new ChatCompletionStreamParser();
     let finalUsage: Record<string, unknown> | undefined;
@@ -210,36 +215,11 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   async refreshUsage(): Promise<GrokUsageSnapshot> {
     try {
       await this.discoverModels();
-      this.updateUsage({ apiError: undefined, updatedAt: Date.now() });
+      this.mergeAndEmitUsage({ apiError: undefined, updatedAt: Date.now() });
     } catch (error) {
       const message = messageOf(error);
-      this.updateUsage({ apiError: message, updatedAt: Date.now() });
-      this.output.appendLine(`[usage] xAI API limit refresh unavailable: ${message}`);
-    }
-    try {
-      let accessToken = await this.oauth.getAccessToken();
-      let response = await this.fetchGrokRateLimits(accessToken);
-      if (response.status === 401) {
-        accessToken = await this.oauth.getAccessToken(true);
-        response = await this.fetchGrokRateLimits(accessToken);
-      }
-      if (response.ok) {
-        const limits = parseGrokRateLimits(await response.json());
-        if (Object.keys(limits).length) {
-          this.updateUsage({ ...limits, modelName: "fast", queryError: undefined, updatedAt: Date.now() });
-          this.output.appendLine("[usage] refreshed Grok query window");
-        }
-      } else {
-        const message = response.status === 403
-          ? "The Grok web query window requires a signed-in browser session and is not exposed to this xAI OAuth session."
-          : `The Grok query-window endpoint returned HTTP ${response.status}.`;
-        this.updateUsage({ queryError: message, updatedAt: Date.now() });
-        this.output.appendLine(`[usage] Grok query window unavailable (HTTP ${response.status}); using xAI API headers`);
-      }
-    } catch (error) {
-      const message = `Unable to check the Grok query window: ${messageOf(error)}`;
-      this.updateUsage({ queryError: message, updatedAt: Date.now() });
-      this.output.appendLine(`[usage] ${message}`);
+      this.mergeAndEmitUsage({ apiError: message, updatedAt: Date.now() });
+      this.output.appendLine(`[activity] xAI API capacity refresh unavailable: ${message}`);
     }
     return this.usage;
   }
@@ -252,7 +232,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     const controller = new AbortController();
     const timeoutSeconds = Math.max(
       10,
-      vscode.workspace.getConfiguration("grokCopilot").get("requestTimeoutSeconds", 600),
+      this.configuration.get("requestTimeoutSeconds", 600),
     );
     const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
     const listener = cancellation.onCancellationRequested(() => controller.abort());
@@ -274,23 +254,9 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     }
   }
 
-  private fetchGrokRateLimits(accessToken: string): Promise<Response> {
-    return fetch(GROK_RATE_LIMITS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": this.userAgent,
-      },
-      body: JSON.stringify({ modelName: "fast" }),
-      signal: AbortSignal.timeout(10_000),
-    });
-  }
-
   private captureApiLimits(headers: Headers, source: string): void {
     const limits = parseApiRateLimitHeaders(headers);
-    if (vscode.workspace.getConfiguration("grokCopilot").get("debugLogging", false)) {
+    if (this.debugLogging) {
       const values = [...headers.entries()]
         .filter(([name]) => name.toLowerCase().startsWith("x-ratelimit-"))
         .map(([name, value]) => `${name}=${value}`)
@@ -298,21 +264,25 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       this.output.appendLine(`[rate-limit] source=${source}${values ? ` ${values}` : " none"}`);
     }
     if (limits.requests || limits.tokens) {
-      this.updateUsage({ ...limits, updatedAt: Date.now() });
+      this.mergeAndEmitUsage({ ...limits, updatedAt: Date.now() });
     }
   }
 
   private captureRequestUsage(raw: Record<string, unknown>, modelId: string): void {
-    this.usage = recordApiRequestUsage(this.usage, raw, modelId);
-    if (vscode.workspace.getConfiguration("grokCopilot").get("debugLogging", false)) {
+    const next = recordApiRequestUsage(this.usage, raw, modelId);
+    if (this.debugLogging) {
       const payload = toProviderUsagePayload(raw);
       this.output.appendLine(`[request-usage] model=${modelId} ${JSON.stringify(payload)}`);
     }
-    this.usageEmitter.fire(this.usage);
+    this.setAndEmitUsage(next);
   }
 
-  private updateUsage(update: GrokUsageSnapshot): void {
-    this.usage = mergeUsageSnapshot(this.usage, update);
+  private mergeAndEmitUsage(update: GrokUsageSnapshot): void {
+    this.setAndEmitUsage(mergeUsageSnapshot(this.usage, update));
+  }
+
+  private setAndEmitUsage(usage: GrokUsageSnapshot): void {
+    this.usage = usage;
     this.usageEmitter.fire(this.usage);
   }
 }
@@ -322,7 +292,7 @@ function buildRequest(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
   options: vscode.ProvideLanguageModelChatResponseOptions,
 ): Record<string, unknown> {
-  const maxTokens = vscode.workspace.getConfiguration("grokCopilot").get("maxOutputTokens", MAX_OUTPUT_TOKENS);
+  const maxTokens = grokConfiguration().get("maxOutputTokens", MAX_OUTPUT_TOKENS);
   const tools = (options.tools ?? []).map((tool) => ({
     type: "function",
     function: {
@@ -339,6 +309,10 @@ function buildRequest(
     max_tokens: maxTokens,
     ...(tools.length ? { tools, tool_choice: toolMode(options.toolMode), parallel_tool_calls: true } : {}),
   };
+}
+
+function grokConfiguration(): vscode.WorkspaceConfiguration {
+  return vscode.workspace.getConfiguration("grokCopilot");
 }
 
 function convertMessage(message: vscode.LanguageModelChatRequestMessage): ApiMessage[] {
@@ -459,8 +433,4 @@ async function apiError(prefix: string, response: Response): Promise<Error> {
     // Use the response text as-is.
   }
   return new Error(`${prefix} (HTTP ${response.status})${detail ? `: ${detail.slice(0, 1000)}` : ""}`);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
