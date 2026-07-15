@@ -1,15 +1,16 @@
 import * as vscode from "vscode";
+import { messageOf } from "./errors";
 import { XaiOAuth } from "./oauth";
 import { ChatCompletionStreamParser, type ChatStreamEvent } from "./sse";
 import {
   mergeUsageSnapshot,
   parseApiRateLimitHeaders,
-  parseGrokRateLimits,
+  recordApiRequestUsage,
+  toProviderUsagePayload,
   type GrokUsageSnapshot,
 } from "./usage";
 
 const API_BASE = "https://api.x.ai/v1";
-const GROK_RATE_LIMITS_URL = "https://grok.com/rest/rate-limits";
 const FALLBACK_MODELS = [
   "grok-4.5",
   "grok-code-fast-1",
@@ -51,6 +52,14 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private lastModelRefreshAt = 0;
   private usage: GrokUsageSnapshot;
 
+  private get configuration(): vscode.WorkspaceConfiguration {
+    return grokConfiguration();
+  }
+
+  private get debugLogging(): boolean {
+    return this.configuration.get("debugLogging", false);
+  }
+
   constructor(
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
@@ -69,8 +78,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 
   clearUsage(): void {
-    this.usage = {};
-    this.usageEmitter.fire(this.usage);
+    this.setAndEmitUsage({});
   }
 
   async refreshModels(): Promise<string[]> {
@@ -84,7 +92,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     const response = await fetch(`${API_BASE}/models`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     });
-    this.captureApiLimits(response.headers);
+    this.captureApiLimits(response.headers, "models");
     if (!response.ok) throw await apiError("Unable to list xAI models", response);
     const body = (await response.json()) as { data?: Array<{ id?: string }> };
     const discovered = (body.data ?? [])
@@ -141,14 +149,14 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       accessToken = await this.oauth.getAccessToken(true);
       response = await this.sendRequest(accessToken, requestBody, token);
     }
-    this.captureApiLimits(response.headers);
+    this.captureApiLimits(response.headers, `chat:${model.rawModelId}`);
     if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
     if (!response.body) throw new Error("xAI returned an empty response stream");
 
-    const debug = vscode.workspace.getConfiguration("grokCopilot").get("debugLogging", false);
-    if (debug) this.output.appendLine(`[request] model=${model.rawModelId} initiator=${options.requestInitiator ?? "unknown"}`);
+    if (this.debugLogging) this.output.appendLine(`[request] model=${model.rawModelId} initiator=${options.requestInitiator ?? "unknown"}`);
 
     const parser = new ChatCompletionStreamParser();
+    let finalUsage: Record<string, unknown> | undefined;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     while (true) {
@@ -160,9 +168,14 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       if (result.done) break;
       for (const event of parser.push(decoder.decode(result.value, { stream: true }))) {
         reportEvent(event, progress);
+        if (event.usage) finalUsage = event.usage;
       }
     }
-    for (const event of parser.finish()) reportEvent(event, progress);
+    for (const event of parser.finish()) {
+      reportEvent(event, progress);
+      if (event.usage) finalUsage = event.usage;
+    }
+    if (finalUsage) this.captureRequestUsage(finalUsage, model.rawModelId);
   }
 
   async provideTokenCount(
@@ -189,45 +202,24 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         stream: false,
       }),
     });
-    this.captureApiLimits(response.headers);
+    this.captureApiLimits(response.headers, `test:${model}`);
     if (!response.ok) throw await apiError("xAI connection test failed", response);
-    const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const body = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: Record<string, unknown>;
+    };
+    if (body.usage) this.captureRequestUsage(body.usage, model);
     return { model, text: body.choices?.[0]?.message?.content?.trim() ?? "(empty response)" };
   }
 
   async refreshUsage(): Promise<GrokUsageSnapshot> {
     try {
       await this.discoverModels();
-      this.updateUsage({ apiError: undefined, updatedAt: Date.now() });
+      this.mergeAndEmitUsage({ apiError: undefined, updatedAt: Date.now() });
     } catch (error) {
       const message = messageOf(error);
-      this.updateUsage({ apiError: message, updatedAt: Date.now() });
-      this.output.appendLine(`[usage] xAI API limit refresh unavailable: ${message}`);
-    }
-    try {
-      let accessToken = await this.oauth.getAccessToken();
-      let response = await this.fetchGrokRateLimits(accessToken);
-      if (response.status === 401) {
-        accessToken = await this.oauth.getAccessToken(true);
-        response = await this.fetchGrokRateLimits(accessToken);
-      }
-      if (response.ok) {
-        const limits = parseGrokRateLimits(await response.json());
-        if (Object.keys(limits).length) {
-          this.updateUsage({ ...limits, modelName: "fast", queryError: undefined, updatedAt: Date.now() });
-          this.output.appendLine("[usage] refreshed Grok query window");
-        }
-      } else {
-        const message = response.status === 403
-          ? "The Grok web query window requires a signed-in browser session and is not exposed to this xAI OAuth session."
-          : `The Grok query-window endpoint returned HTTP ${response.status}.`;
-        this.updateUsage({ queryError: message, updatedAt: Date.now() });
-        this.output.appendLine(`[usage] Grok query window unavailable (HTTP ${response.status}); using xAI API headers`);
-      }
-    } catch (error) {
-      const message = `Unable to check the Grok query window: ${messageOf(error)}`;
-      this.updateUsage({ queryError: message, updatedAt: Date.now() });
-      this.output.appendLine(`[usage] ${message}`);
+      this.mergeAndEmitUsage({ apiError: message, updatedAt: Date.now() });
+      this.output.appendLine(`[activity] xAI API capacity refresh unavailable: ${message}`);
     }
     return this.usage;
   }
@@ -240,7 +232,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     const controller = new AbortController();
     const timeoutSeconds = Math.max(
       10,
-      vscode.workspace.getConfiguration("grokCopilot").get("requestTimeoutSeconds", 600),
+      this.configuration.get("requestTimeoutSeconds", 600),
     );
     const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
     const listener = cancellation.onCancellationRequested(() => controller.abort());
@@ -262,29 +254,35 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     }
   }
 
-  private fetchGrokRateLimits(accessToken: string): Promise<Response> {
-    return fetch(GROK_RATE_LIMITS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": this.userAgent,
-      },
-      body: JSON.stringify({ modelName: "fast" }),
-      signal: AbortSignal.timeout(10_000),
-    });
-  }
-
-  private captureApiLimits(headers: Headers): void {
+  private captureApiLimits(headers: Headers, source: string): void {
     const limits = parseApiRateLimitHeaders(headers);
+    if (this.debugLogging) {
+      const values = [...headers.entries()]
+        .filter(([name]) => name.toLowerCase().startsWith("x-ratelimit-"))
+        .map(([name, value]) => `${name}=${value}`)
+        .join(" ");
+      this.output.appendLine(`[rate-limit] source=${source}${values ? ` ${values}` : " none"}`);
+    }
     if (limits.requests || limits.tokens) {
-      this.updateUsage({ ...limits, updatedAt: Date.now() });
+      this.mergeAndEmitUsage({ ...limits, updatedAt: Date.now() });
     }
   }
 
-  private updateUsage(update: GrokUsageSnapshot): void {
-    this.usage = mergeUsageSnapshot(this.usage, update);
+  private captureRequestUsage(raw: Record<string, unknown>, modelId: string): void {
+    const next = recordApiRequestUsage(this.usage, raw, modelId);
+    if (this.debugLogging) {
+      const payload = toProviderUsagePayload(raw);
+      this.output.appendLine(`[request-usage] model=${modelId} ${JSON.stringify(payload)}`);
+    }
+    this.setAndEmitUsage(next);
+  }
+
+  private mergeAndEmitUsage(update: GrokUsageSnapshot): void {
+    this.setAndEmitUsage(mergeUsageSnapshot(this.usage, update));
+  }
+
+  private setAndEmitUsage(usage: GrokUsageSnapshot): void {
+    this.usage = usage;
     this.usageEmitter.fire(this.usage);
   }
 }
@@ -294,7 +292,7 @@ function buildRequest(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
   options: vscode.ProvideLanguageModelChatResponseOptions,
 ): Record<string, unknown> {
-  const maxTokens = vscode.workspace.getConfiguration("grokCopilot").get("maxOutputTokens", MAX_OUTPUT_TOKENS);
+  const maxTokens = grokConfiguration().get("maxOutputTokens", MAX_OUTPUT_TOKENS);
   const tools = (options.tools ?? []).map((tool) => ({
     type: "function",
     function: {
@@ -311,6 +309,10 @@ function buildRequest(
     max_tokens: maxTokens,
     ...(tools.length ? { tools, tool_choice: toolMode(options.toolMode), parallel_tool_calls: true } : {}),
   };
+}
+
+function grokConfiguration(): vscode.WorkspaceConfiguration {
+  return vscode.workspace.getConfiguration("grokCopilot");
 }
 
 function convertMessage(message: vscode.LanguageModelChatRequestMessage): ApiMessage[] {
@@ -398,29 +400,9 @@ function reportEvent(
     ));
   }
   if (event.usage) {
-    const data = new TextEncoder().encode(JSON.stringify(normalizeUsage(event.usage)));
+    const data = new TextEncoder().encode(JSON.stringify(toProviderUsagePayload(event.usage)));
     progress.report(new vscode.LanguageModelDataPart(data, "usage"));
   }
-}
-
-function normalizeUsage(usage: Record<string, unknown>): Record<string, unknown> {
-  const prompt = numberValue(usage.prompt_tokens);
-  const completion = numberValue(usage.completion_tokens);
-  const details = typeof usage.prompt_tokens_details === "object" && usage.prompt_tokens_details
-    ? usage.prompt_tokens_details as Record<string, unknown>
-    : {};
-  const costTicks = numberValue(usage.cost_in_usd_ticks);
-  return {
-    promptTokens: prompt,
-    completionTokens: completion,
-    totalTokens: numberValue(usage.total_tokens) ?? (prompt ?? 0) + (completion ?? 0),
-    cachedTokens: numberValue(details.cached_tokens),
-    ...(costTicks === undefined ? {} : { copilotCredits: costTicks / 100_000_000 }),
-  };
-}
-
-function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function parseArguments(value: string): object {
@@ -451,8 +433,4 @@ async function apiError(prefix: string, response: Response): Promise<Error> {
     // Use the response text as-is.
   }
   return new Error(`${prefix} (HTTP ${response.status})${detail ? `: ${detail.slice(0, 1000)}` : ""}`);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

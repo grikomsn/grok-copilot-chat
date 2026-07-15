@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { messageOf } from "./errors";
 import { XaiOAuth } from "./oauth";
 import { GrokProvider } from "./provider";
 import {
@@ -9,7 +10,7 @@ import {
   type UsageDisplayRow,
 } from "./usage";
 
-const USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v1";
+const USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v2";
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Grok");
@@ -23,14 +24,13 @@ export function activate(context: vscode.ExtensionContext): void {
     context.globalState.get<GrokUsageSnapshot>(USAGE_STATE_KEY) ?? {},
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
-  usageStatus.name = "Grok usage limits";
+  usageStatus.name = "Grok API activity";
   usageStatus.command = "grokCopilot.showUsage";
   renderUsageStatus(usageStatus, provider.getUsageSnapshot());
 
   context.subscriptions.push(
     output,
     usageStatus,
-    provider.onDidChangeLanguageModelChatInformation(() => undefined),
     provider.onDidChangeUsage((usage) => {
       renderUsageStatus(usageStatus, usage);
       usageStatus.show();
@@ -41,7 +41,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grokCopilot.signInDevice", () => signInWithDevice(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.refreshModels", () => refreshModels(provider)),
     vscode.commands.registerCommand("grokCopilot.showUsage", () => showUsage(provider, output)),
-    vscode.commands.registerCommand("grokCopilot.openUsage", () => openGrokUsage()),
+    vscode.commands.registerCommand("grokCopilot.openUsage", () => openXaiUsage()),
     vscode.commands.registerCommand("grokCopilot.diagnostics", () => diagnostics(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.manage", () => manage(oauth, provider, output, usageStatus)),
   );
@@ -49,11 +49,9 @@ export function activate(context: vscode.ExtensionContext): void {
   void oauth.hasSession().then((signedIn) => {
     if (!signedIn) return;
     usageStatus.show();
-    void provider.refreshUsage().catch((error) => output.appendLine(`[usage] initial refresh failed: ${messageOf(error)}`));
+    void provider.refreshUsage().catch((error) => output.appendLine(`[activity] initial refresh failed: ${messageOf(error)}`));
   });
 }
-
-export function deactivate(): void {}
 
 async function manage(
   oauth: XaiOAuth,
@@ -64,8 +62,8 @@ async function manage(
   const signedIn = await oauth.hasSession();
   const choices = signedIn
     ? [
-        { label: "$(pulse) Show usage limits", action: "usage" },
-        { label: "$(link-external) Open Grok account usage", action: "openUsage" },
+        { label: "$(graph) Show API activity and spend", action: "usage" },
+        { label: "$(link-external) Open xAI Console usage", action: "openUsage" },
         { label: "$(check) Test xAI connection", action: "test" },
         { label: "$(refresh) Refresh Grok models", action: "refresh" },
         { label: "$(output) Show Grok logs", action: "logs" },
@@ -84,7 +82,7 @@ async function manage(
   else if (picked.action === "device") await signInWithDevice(oauth, provider, output);
   else if (picked.action === "refresh") await refreshModels(provider);
   else if (picked.action === "usage") await showUsage(provider, output);
-  else if (picked.action === "openUsage") await openGrokUsage();
+  else if (picked.action === "openUsage") await openXaiUsage();
   else if (picked.action === "logs") output.show(true);
   else if (picked.action === "test") await testConnection(provider, output);
   else if (picked.action === "signout") {
@@ -118,7 +116,7 @@ async function signInWithBrowser(
       },
     );
     const models = await provider.refreshModels();
-    void provider.refreshUsage().catch((error) => output.appendLine(`[usage] post-sign-in refresh failed: ${messageOf(error)}`));
+    void provider.refreshUsage().catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI. Found ${models.length} Grok models.`);
   } catch (error) {
     attempt?.cancel();
@@ -150,7 +148,7 @@ async function signInWithDevice(oauth: XaiOAuth, provider: GrokProvider, output:
       },
     );
     const models = await provider.refreshModels();
-    void provider.refreshUsage().catch((error) => output.appendLine(`[usage] post-sign-in refresh failed: ${messageOf(error)}`));
+    void provider.refreshUsage().catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI. Found ${models.length} Grok models.`);
   } catch (error) {
     const message = messageOf(error);
@@ -186,43 +184,43 @@ async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): 
   let snapshot = provider.getUsageSnapshot();
   try {
     snapshot = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: "Refreshing Grok usage limits…" },
+      { location: vscode.ProgressLocation.Window, title: "Refreshing Grok API activity…" },
       () => provider.refreshUsage(),
     );
   } catch (error) {
-    output.appendLine(`[usage] refresh failed: ${messageOf(error)}`);
-    if (!snapshot.updatedAt) vscode.window.showWarningMessage(`Unable to refresh Grok usage limits: ${messageOf(error)}`);
+    output.appendLine(`[activity] refresh failed: ${messageOf(error)}`);
+    if (!snapshot.updatedAt) vscode.window.showWarningMessage(`Unable to refresh Grok API activity: ${messageOf(error)}`);
   }
   const picked = await vscode.window.showQuickPick<UsageQuickPickItem>([
     ...formatUsageRows(snapshot).map(toUsageQuickPickItem),
     { label: "Account", kind: vscode.QuickPickItemKind.Separator },
     {
-      label: "$(link-external) Open Grok account usage",
-      description: "Weekly allowance and Extra Usage Credits",
+      label: "$(link-external) Open xAI Console usage",
+      description: "Account-wide API usage and prepaid credits",
       action: "openUsage",
       alwaysShow: true,
     },
     {
-      label: "$(refresh) Refresh limits",
-      description: "Check xAI again",
+      label: "$(refresh) Refresh rate capacity",
+      description: "Check the xAI API again",
       action: "refresh",
       alwaysShow: true,
     },
   ], {
     title: snapshot.updatedAt
-      ? `Grok usage limits — updated ${new Date(snapshot.updatedAt).toLocaleTimeString()}`
-      : "Grok usage limits",
-    placeHolder: "Live xAI API limits; hover the status-bar indicator for a summary",
+      ? `Grok API activity — updated ${new Date(snapshot.updatedAt).toLocaleTimeString()}`
+      : "Grok API activity",
+    placeHolder: "Exact billed spend on this device plus transient API rate capacity",
     matchOnDescription: true,
     matchOnDetail: true,
   });
-  if (picked?.action === "openUsage") await openGrokUsage();
+  if (picked?.action === "openUsage") await openXaiUsage();
   else if (picked?.action === "refresh") await showUsage(provider, output);
 }
 
-async function openGrokUsage(): Promise<void> {
-  const opened = await vscode.env.openExternal(vscode.Uri.parse("https://grok.com/?_s=usage"));
-  if (!opened) vscode.window.showWarningMessage("VS Code could not open the Grok Usage page.");
+async function openXaiUsage(): Promise<void> {
+  const opened = await vscode.env.openExternal(vscode.Uri.parse("https://console.x.ai/team/default/usage"));
+  if (!opened) vscode.window.showWarningMessage("VS Code could not open the xAI Console usage page.");
 }
 
 function renderUsageStatus(item: vscode.StatusBarItem, snapshot: GrokUsageSnapshot): void {
@@ -236,9 +234,10 @@ interface UsageQuickPickItem extends vscode.QuickPickItem {
 
 function toUsageQuickPickItem(row: UsageDisplayRow): UsageQuickPickItem {
   const icon = {
+    spend: "$(graph)",
+    request: "$(history)",
     requests: "$(request-changes)",
     tokens: "$(symbol-numeric)",
-    query: "$(comment-discussion)",
     warning: "$(warning)",
     empty: "$(circle-slash)",
   }[row.kind];
@@ -268,8 +267,4 @@ async function diagnostics(
   output.appendLine(`[diagnostics] models=${models.length}`);
   const doc = await vscode.workspace.openTextDocument({ content: lines.join("\n"), language: "markdown" });
   await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

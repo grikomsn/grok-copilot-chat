@@ -8,12 +8,12 @@ npm test
 npm run package
 ```
 
-`npm test` compiles the extension and runs the OAuth and streaming-parser tests. `npm run package` validates the project and creates an installable VSIX.
+Tests are colocated with the modules they cover. `npm test` performs a clean compile and runs the OAuth, streaming-parser, and usage tests. `npm run package` validates the project and creates an installable VSIX.
 
 Install the local build with:
 
 ```bash
-code --install-extension grok-copilot-chat-0.1.1.vsix --force
+code --install-extension grok-copilot-chat-<version>.vsix --force
 ```
 
 ## Release workflow

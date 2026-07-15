@@ -21,8 +21,9 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 - Live Grok model discovery
 - Streaming text and reasoning
 - Agent mode tool calls and image inputs
-- Usage and cost metadata when returned by xAI
-- Live remaining query, request, and token limits in the VS Code status bar
+- Native VS Code context-window accounting from xAI token usage
+- Exact per-request and locally accumulated billed spend from xAI
+- Clearly labeled request-rate and tokens-per-minute capacity
 
 ## Quick start
 
@@ -30,7 +31,9 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 2. Run **Grok: Sign In to xAI** from the Command Palette and complete authorization in your browser. Use **Grok: Sign In to xAI with Device Code** if the browser callback is unavailable.
 3. Open Copilot Chat, select **Manage Models**, enable **xAI Grok**, then choose a Grok model.
 
-Use **Grok: Show Usage Limits** or click the Grok status-bar item to open a compact limits popup. Hover the indicator for a quick summary. Last-known counts persist across VS Code reloads, and the popup links to Grok's account Usage page for the weekly allowance and Extra Usage Credits.
+Use **Grok: Show API Activity and Spend** or click the Grok status-bar item to open a compact popup. It shows exact xAI-billed spend and token counts accumulated by this extension on the current device, the latest request, and transient API rate capacity. Hover the indicator for a quick summary. Tracked totals persist across VS Code reloads, and the popup links to the xAI Console for account-wide usage and prepaid credits.
+
+The request and token capacity values are short-window throughput limits (RPS/TPM), not a declining credit balance. Account-wide prepaid balance requires a separate xAI Management API key and remains available in the xAI Console; the normal OAuth session cannot read it.
 
 Use **Grok: Manage xAI Connection** to inspect usage, test the connection, refresh models, inspect logs, or sign out.
 

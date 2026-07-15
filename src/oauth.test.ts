@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAuthorizeUrl, XaiOAuth, XAI_SESSION_SECRET, type SessionStore } from "../oauth";
+import { buildAuthorizeUrl, XaiOAuth, XAI_SESSION_SECRET, type SessionStore } from "./oauth";
 
 class MemoryStore implements SessionStore {
   readonly values = new Map<string, string>();

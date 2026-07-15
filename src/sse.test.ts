@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ChatCompletionStreamParser } from "../sse";
+import { ChatCompletionStreamParser } from "./sse";
 
 test("parses fragmented text, reasoning, usage, and tool calls", () => {
   const parser = new ChatCompletionStreamParser();

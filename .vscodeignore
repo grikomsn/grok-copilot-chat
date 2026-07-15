@@ -8,7 +8,8 @@ CODE_OF_CONDUCT.md
 CONTRIBUTING.md
 SECURITY.md
 src/**
-out/test/**
+out/**/*.test.*
+out/*.test.*
 **/*.map
 **/.DS_Store
 tsconfig.json
