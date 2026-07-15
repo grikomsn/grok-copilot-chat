@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 
 const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
 const AUTHORIZE_URL = "https://auth.x.ai/oauth2/authorize";
@@ -11,6 +11,7 @@ const OAUTH_HOST = "127.0.0.1";
 const OAUTH_PORT = 56121;
 const OAUTH_CALLBACK_PATH = "/callback";
 const REDIRECT_URI = `http://${OAUTH_HOST}:${OAUTH_PORT}${OAUTH_CALLBACK_PATH}`;
+const OAUTH_CALLBACK_HOST = `${OAUTH_HOST}:${OAUTH_PORT}`;
 export const XAI_SESSION_SECRET = "grokCopilot.xaiOAuthSession";
 
 export interface OAuthSession {
@@ -174,47 +175,50 @@ export class XaiOAuth {
     const completion = new Promise<OAuthSession>((resolve, reject) => {
       rejectCompletion = reject;
       server = createServer(async (request, response) => {
+        if (request.headers.host !== OAUTH_CALLBACK_HOST) {
+          sendCallbackText(response, 400, "Invalid OAuth callback host.");
+          return;
+        }
+        if (request.method !== "GET") {
+          sendCallbackText(response, 405, "Method not allowed.", { Allow: "GET" });
+          return;
+        }
         const callback = new URL(request.url ?? "/", REDIRECT_URI);
         if (callback.pathname !== OAUTH_CALLBACK_PATH) {
-          response.writeHead(404).end("Not found");
+          sendCallbackText(response, 404, "Not found.");
           return;
         }
         if (settled) {
-          response.writeHead(409).end("This sign-in attempt is already complete.");
+          sendCallbackText(response, 409, "This sign-in attempt is already complete.");
           return;
         }
         const oauthError = callback.searchParams.get("error");
         const code = callback.searchParams.get("code");
+        if (callback.searchParams.get("state") !== state) {
+          sendCallbackHtml(response, 400, "xAI sign-in failed", "Invalid xAI OAuth callback state.");
+          return;
+        }
         if (oauthError) {
           settled = true;
           const error = new Error(callback.searchParams.get("error_description") ?? oauthError);
-          response.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-          response.end(callbackPage("xAI sign-in failed", error.message));
+          sendCallbackHtml(response, 400, "xAI sign-in failed", "The authorization request was denied. Return to Visual Studio Code for details.");
           close();
           reject(error);
           return;
         }
-        if (!code || callback.searchParams.get("state") !== state) {
-          settled = true;
-          const error = new Error("Invalid xAI OAuth callback state");
-          response.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-          response.end(callbackPage("xAI sign-in failed", error.message));
-          close();
-          reject(error);
+        if (!code) {
+          sendCallbackHtml(response, 400, "xAI sign-in failed", "The xAI OAuth callback did not include an authorization code.");
           return;
         }
         try {
           const session = await this.exchangeAuthorizationCode(code, pkce.verifier);
           settled = true;
-          response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-          response.end(callbackPage("Signed in to xAI", "You can close this tab and return to Visual Studio Code."));
+          sendCallbackHtml(response, 200, "Signed in to xAI", "You can close this tab and return to Visual Studio Code.");
           close();
           resolve(session);
         } catch (error) {
           settled = true;
-          const message = error instanceof Error ? error.message : String(error);
-          response.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
-          response.end(callbackPage("xAI sign-in failed", message));
+          sendCallbackHtml(response, 500, "xAI sign-in failed", "Unable to complete sign-in. Return to Visual Studio Code for details.");
           close();
           reject(error);
         }
@@ -383,6 +387,31 @@ function callbackPage(title: string, detail: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
   return `<!doctype html><meta charset="utf-8"><title>${escape(title)}</title><style>body{font:16px system-ui;max-width:42rem;margin:10vh auto;padding:2rem;color:#eee;background:#111}h1{color:#fff}</style><h1>${escape(title)}</h1><p>${escape(detail)}</p>`;
+}
+
+function callbackHeaders(contentType: string): Record<string, string> {
+  return {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "Content-Type": contentType,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+  };
+}
+
+function sendCallbackHtml(response: ServerResponse, status: number, title: string, detail: string): void {
+  response.writeHead(status, callbackHeaders("text/html; charset=utf-8"));
+  response.end(callbackPage(title, detail));
+}
+
+function sendCallbackText(
+  response: ServerResponse,
+  status: number,
+  detail: string,
+  headers: Record<string, string> = {},
+): void {
+  response.writeHead(status, { ...callbackHeaders("text/plain; charset=utf-8"), ...headers });
+  response.end(detail);
 }
 
 function toSession(tokens: TokenResponse, fallbackRefreshToken: string | undefined, now: number): OAuthSession {
