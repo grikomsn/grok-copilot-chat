@@ -2,7 +2,7 @@
   "name": "grok-copilot-chat",
   "displayName": "Grok for GitHub Copilot Chat",
   "description": "Use xAI Grok models in GitHub Copilot Chat with xAI OAuth.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "grikomsn",
   "icon": "assets/icon.png",
   "license": "MIT",
