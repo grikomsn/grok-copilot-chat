@@ -24,6 +24,13 @@ export interface HeaderReader {
   get(name: string): string | null;
 }
 
+export interface UsageDisplayRow {
+  kind: "query" | "requests" | "tokens" | "warning" | "empty";
+  label: string;
+  description: string;
+  detail?: string;
+}
+
 interface GrokRateLimitsBody {
   windowSizeSeconds?: unknown;
   remainingQueries?: unknown;
@@ -95,55 +102,47 @@ export function formatUsageTooltip(snapshot: GrokUsageSnapshot, now = Date.now()
   return lines.join("\n");
 }
 
-export function formatUsageMarkdown(snapshot: GrokUsageSnapshot, now = Date.now()): string {
-  const lines = [
-    "# Grok usage limits",
-    "",
-    snapshot.updatedAt ? `Last checked: ${new Date(snapshot.updatedAt).toLocaleString()}` : "No live limits have been observed yet.",
-    "",
-  ];
-
+export function formatUsageRows(snapshot: GrokUsageSnapshot, now = Date.now()): UsageDisplayRow[] {
+  const rows: UsageDisplayRow[] = [];
+  if (snapshot.requests) rows.push(bucketRow("requests", "API requests", snapshot.requests, now));
+  if (snapshot.tokens) rows.push(bucketRow("tokens", "API tokens", snapshot.tokens, now));
   if (snapshot.query) {
-    lines.push("## Grok query window", "", markdownBucket(snapshot.query, now));
-    if (snapshot.modelName) lines.push(`- Model group: \`${snapshot.modelName}\``);
-    if (snapshot.lowEffort) lines.push(`- Low effort: ${bucketSummary(snapshot.lowEffort, now)}`);
-    if (snapshot.highEffort) lines.push(`- High effort: ${bucketSummary(snapshot.highEffort, now)}`);
-    lines.push("");
+    const details = [
+      snapshot.query.windowSizeSeconds ? `Window: ${formatWindowDuration(snapshot.query.windowSizeSeconds * 1000)}` : undefined,
+      snapshot.modelName ? `Model group: ${snapshot.modelName}` : undefined,
+      snapshot.lowEffort ? `Low effort: ${bucketSummary(snapshot.lowEffort, now)}` : undefined,
+      snapshot.highEffort ? `High effort: ${bucketSummary(snapshot.highEffort, now)}` : undefined,
+    ].filter((value): value is string => Boolean(value));
+    rows.push({
+      kind: "query",
+      label: "Grok query window",
+      description: bucketSummary(snapshot.query, now),
+      ...(details.length ? { detail: details.join(" · ") } : {}),
+    });
   } else if (snapshot.queryError) {
-    lines.push(
-      "## Grok query window",
-      "",
-      snapshot.queryError,
-      "",
-    );
+    rows.push({
+      kind: "warning",
+      label: "Grok web query window",
+      description: "Browser session required",
+      detail: snapshot.queryError,
+    });
   }
-
-  if (snapshot.requests || snapshot.tokens) {
-    lines.push("## xAI API", "");
-    if (snapshot.requests) lines.push(`- Requests: ${bucketSummary(snapshot.requests, now)}`);
-    if (snapshot.tokens) lines.push(`- Tokens: ${bucketSummary(snapshot.tokens, now)}`);
-    lines.push("", "These values come from the rate-limit headers returned by `api.x.ai`.", "");
-  } else if (snapshot.apiError) {
-    lines.push("## xAI API", "", snapshot.apiError, "");
+  if (snapshot.apiError) {
+    rows.push({
+      kind: "warning",
+      label: "xAI API limits unavailable",
+      description: "Check API credits or subscription",
+      detail: snapshot.apiError,
+    });
   }
-
-  if (!hasUsageLimits(snapshot)) {
-    lines.push(
-      "No numeric OAuth/API limits are currently available. Send a Grok request or run **Grok: Show Usage Limits** again after adding API credits or activating an eligible subscription.",
-      "",
-    );
+  if (!rows.length) {
+    rows.push({
+      kind: "empty",
+      label: "No live limits observed yet",
+      description: "Send a Grok request, then refresh",
+    });
   }
-
-  lines.push(
-    "## Account billing",
-    "",
-    "Weekly allowance, reset date, and Extra Usage Credits remain on Grok's account page:",
-    "",
-    "[Open Grok Usage](https://grok.com/?_s=usage)",
-    "",
-    "> Limits are last-known values and can change outside Visual Studio Code.",
-  );
-  return lines.join("\n");
+  return rows;
 }
 
 function parseQueryWindow(value: unknown): QueryWindow | undefined {
@@ -215,11 +214,18 @@ function formatBucketLine(label: string, bucket: LimitBucket, now: number): stri
   return `${label}: ${bucketSummary(bucket, now)}`;
 }
 
-function markdownBucket(bucket: QueryWindow, now: number): string {
-  const lines = [`- Remaining: ${exactCount(bucket.remaining)} of ${exactCount(bucket.limit)}`];
-  if (bucket.windowSizeSeconds) lines.push(`- Window: ${formatWindowDuration(bucket.windowSizeSeconds * 1000)}`);
-  if (bucket.resetsAt) lines.push(`- Resets: ${formatResetTime(bucket.resetsAt, now)}`);
-  return lines.join("\n");
+function bucketRow(
+  kind: "requests" | "tokens",
+  label: string,
+  bucket: LimitBucket,
+  now: number,
+): UsageDisplayRow {
+  return {
+    kind,
+    label,
+    description: bucketSummary(bucket, now),
+    detail: "Live limit from api.x.ai response headers",
+  };
 }
 
 function bucketSummary(bucket: LimitBucket, now: number): string {
