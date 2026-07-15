@@ -55,11 +55,11 @@
       },
       {
         "command": "grokCopilot.showUsage",
-        "title": "Grok: Show Usage Limits"
+        "title": "Grok: Show API Activity and Spend"
       },
       {
         "command": "grokCopilot.openUsage",
-        "title": "Grok: Open Account Usage"
+        "title": "Grok: Open xAI Console Usage"
       },
       {
         "command": "grokCopilot.diagnostics",
@@ -85,7 +85,7 @@
         "grokCopilot.debugLogging": {
           "type": "boolean",
           "default": false,
-          "description": "Log request and stream metadata to the Grok output channel. Prompts and OAuth tokens are never logged."
+          "description": "Log request, usage, stream, and xAI rate-limit header metadata to the Grok output channel. Prompts and OAuth tokens are never logged."
         }
       }
     },

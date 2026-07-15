@@ -6,6 +6,8 @@ import {
   mergeUsageSnapshot,
   parseApiRateLimitHeaders,
   parseGrokRateLimits,
+  recordApiRequestUsage,
+  toProviderUsagePayload,
 } from "../usage";
 
 test("parses Grok query windows", () => {
@@ -72,9 +74,9 @@ test("usage popup rows distinguish live API and query limits", () => {
   assert.deepEqual(rows, [
     {
       kind: "requests",
-      label: "API requests",
+      label: "Request rate capacity",
       description: "238 of 240 remaining",
-      detail: "Live limit from api.x.ai response headers",
+      detail: "Transient API throughput capacity from xAI response headers; not account credits or cumulative usage",
     },
     {
       kind: "query",
@@ -83,6 +85,37 @@ test("usage popup rows distinguish live API and query limits", () => {
       detail: "Window: 2 hours · Model group: fast",
     },
   ]);
+});
+
+test("reports VS Code usage in OpenAI shape and accumulates exact xAI cost", () => {
+  const raw = {
+    prompt_tokens: 120,
+    completion_tokens: 30,
+    prompt_tokens_details: { cached_tokens: 20 },
+    completion_tokens_details: { reasoning_tokens: 12 },
+    cost_in_usd_ticks: 37_756_000,
+  };
+  assert.deepEqual(toProviderUsagePayload(raw), {
+    prompt_tokens: 120,
+    completion_tokens: 30,
+    total_tokens: 150,
+    prompt_tokens_details: { cached_tokens: 20 },
+    completion_tokens_details: { reasoning_tokens: 12 },
+    copilotCredits: 0.37756,
+  });
+  const first = recordApiRequestUsage({}, raw, "grok-4.5", 1000);
+  const second = recordApiRequestUsage(first, raw, "grok-4.5", 2000);
+  assert.deepEqual(second.tracked, {
+    requests: 2,
+    promptTokens: 240,
+    completionTokens: 60,
+    totalTokens: 300,
+    cachedTokens: 40,
+    reasoningTokens: 24,
+    costUsdTicks: 75_512_000,
+  });
+  assert.equal(formatUsageStatusBar(second), "$(graph) Grok $0.007551");
+  assert.match(formatUsageRows(second, 2000)[0].description, /\$0\.007551 across 2 requests/);
 });
 
 test("usage UI explains an account without API quota", () => {
