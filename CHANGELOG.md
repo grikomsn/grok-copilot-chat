@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+### Patch Changes
+
+- 5f03e89: Harden the browser OAuth callback against forged requests and reflected markup with state-first validation, strict loopback request checks, non-reflective error pages, output encoding, and restrictive browser response headers.
+
 ## 0.2.1
 
 ### Patch Changes
