@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  formatUsageMarkdown,
+  formatUsageRows,
   formatUsageStatusBar,
   mergeUsageSnapshot,
   parseApiRateLimitHeaders,
@@ -62,17 +62,27 @@ test("merges independent live sources and formats the status", () => {
   assert.equal(formatUsageStatusBar(snapshot), "$(pulse) Grok 69/70");
 });
 
-test("usage Markdown distinguishes live limits from account billing", () => {
-  const markdown = formatUsageMarkdown({
+test("usage popup rows distinguish live API and query limits", () => {
+  const rows = formatUsageRows({
     modelName: "fast",
     query: { limit: 70, remaining: 68, windowSizeSeconds: 7200 },
     requests: { limit: 240, remaining: 238 },
     updatedAt: Date.UTC(2026, 6, 15, 12),
   }, Date.UTC(2026, 6, 15, 12));
-  assert.match(markdown, /68 of 70/);
-  assert.match(markdown, /Requests: 238 of 240 remaining/);
-  assert.match(markdown, /Open Grok Usage/);
-  assert.match(markdown, /Extra Usage Credits/);
+  assert.deepEqual(rows, [
+    {
+      kind: "requests",
+      label: "API requests",
+      description: "238 of 240 remaining",
+      detail: "Live limit from api.x.ai response headers",
+    },
+    {
+      kind: "query",
+      label: "Grok query window",
+      description: "68 of 70 remaining",
+      detail: "Window: 2 hours · Model group: fast",
+    },
+  ]);
 });
 
 test("usage UI explains an account without API quota", () => {
@@ -82,8 +92,8 @@ test("usage UI explains an account without API quota", () => {
     updatedAt: Date.UTC(2026, 6, 15, 12),
   };
   assert.equal(formatUsageStatusBar(snapshot), "$(warning) Grok API unavailable");
-  const markdown = formatUsageMarkdown(snapshot, snapshot.updatedAt);
-  assert.match(markdown, /run out of credits/);
-  assert.match(markdown, /signed-in browser session/);
-  assert.match(markdown, /No numeric OAuth\/API limits/);
+  const rows = formatUsageRows(snapshot, snapshot.updatedAt);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].detail ?? "", /signed-in browser session/);
+  assert.match(rows[1].detail ?? "", /run out of credits/);
 });

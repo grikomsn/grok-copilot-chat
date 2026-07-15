@@ -28,7 +28,7 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 | **Grok: Open Account Usage** | Open Grok's weekly allowance and credits page |
 | **Grok: Show Diagnostics** | Show the VS Code version, session state, and registered models |
 
-The status bar shows the last query window returned by Grok, or the latest request/token limits returned in xAI API headers. Click it for timestamps and source details. Weekly allowance, reset date, and Extra Usage Credits remain on Grok's account Usage page.
+The status bar shows the last query window returned by Grok, or the latest request/token limits returned in xAI API headers. Hover it for a summary or click it for a native popup with exact values, refresh, and account actions. Last-known counts persist across VS Code reloads. Weekly allowance, reset date, and Extra Usage Credits remain on Grok's account Usage page.
 
 ## Settings
 

@@ -1,7 +1,15 @@
 import * as vscode from "vscode";
 import { XaiOAuth } from "./oauth";
 import { GrokProvider } from "./provider";
-import { formatUsageMarkdown, formatUsageStatusBar, formatUsageTooltip, type GrokUsageSnapshot } from "./usage";
+import {
+  formatUsageRows,
+  formatUsageStatusBar,
+  formatUsageTooltip,
+  type GrokUsageSnapshot,
+  type UsageDisplayRow,
+} from "./usage";
+
+const USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v1";
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Grok");
@@ -12,6 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
     oauth,
     output,
     `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
+    context.globalState.get<GrokUsageSnapshot>(USAGE_STATE_KEY) ?? {},
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   usageStatus.name = "Grok usage limits";
@@ -25,6 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
     provider.onDidChangeUsage((usage) => {
       renderUsageStatus(usageStatus, usage);
       usageStatus.show();
+      void context.globalState.update(USAGE_STATE_KEY, usage);
     }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     vscode.commands.registerCommand("grokCopilot.signIn", () => signInWithBrowser(oauth, provider, output)),
@@ -183,11 +193,31 @@ async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): 
     output.appendLine(`[usage] refresh failed: ${messageOf(error)}`);
     if (!snapshot.updatedAt) vscode.window.showWarningMessage(`Unable to refresh Grok usage limits: ${messageOf(error)}`);
   }
-  const doc = await vscode.workspace.openTextDocument({
-    content: formatUsageMarkdown(snapshot),
-    language: "markdown",
+  const picked = await vscode.window.showQuickPick<UsageQuickPickItem>([
+    ...formatUsageRows(snapshot).map(toUsageQuickPickItem),
+    { label: "Account", kind: vscode.QuickPickItemKind.Separator },
+    {
+      label: "$(link-external) Open Grok account usage",
+      description: "Weekly allowance and Extra Usage Credits",
+      action: "openUsage",
+      alwaysShow: true,
+    },
+    {
+      label: "$(refresh) Refresh limits",
+      description: "Check xAI again",
+      action: "refresh",
+      alwaysShow: true,
+    },
+  ], {
+    title: snapshot.updatedAt
+      ? `Grok usage limits — updated ${new Date(snapshot.updatedAt).toLocaleTimeString()}`
+      : "Grok usage limits",
+    placeHolder: "Live xAI API limits; hover the status-bar indicator for a summary",
+    matchOnDescription: true,
+    matchOnDetail: true,
   });
-  await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside, true);
+  if (picked?.action === "openUsage") await openGrokUsage();
+  else if (picked?.action === "refresh") await showUsage(provider, output);
 }
 
 async function openGrokUsage(): Promise<void> {
@@ -198,6 +228,26 @@ async function openGrokUsage(): Promise<void> {
 function renderUsageStatus(item: vscode.StatusBarItem, snapshot: GrokUsageSnapshot): void {
   item.text = formatUsageStatusBar(snapshot);
   item.tooltip = formatUsageTooltip(snapshot);
+}
+
+interface UsageQuickPickItem extends vscode.QuickPickItem {
+  action?: "openUsage" | "refresh";
+}
+
+function toUsageQuickPickItem(row: UsageDisplayRow): UsageQuickPickItem {
+  const icon = {
+    requests: "$(request-changes)",
+    tokens: "$(symbol-numeric)",
+    query: "$(comment-discussion)",
+    warning: "$(warning)",
+    empty: "$(circle-slash)",
+  }[row.kind];
+  return {
+    label: `${icon} ${row.label}`,
+    description: row.description,
+    detail: row.detail,
+    alwaysShow: true,
+  };
 }
 
 async function diagnostics(

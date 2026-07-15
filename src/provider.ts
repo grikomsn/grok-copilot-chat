@@ -49,13 +49,16 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   readonly onDidChangeUsage = this.usageEmitter.event;
   private models = [...FALLBACK_MODELS];
   private lastModelRefreshAt = 0;
-  private usage: GrokUsageSnapshot = {};
+  private usage: GrokUsageSnapshot;
 
   constructor(
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
     private readonly userAgent: string,
-  ) {}
+    initialUsage: GrokUsageSnapshot = {},
+  ) {
+    this.usage = initialUsage;
+  }
 
   fireDidChange(): void {
     this.changeEmitter.fire();
