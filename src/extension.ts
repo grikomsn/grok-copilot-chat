@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { XaiOAuth } from "./oauth";
 import { GrokProvider } from "./provider";
+import { formatUsageMarkdown, formatUsageStatusBar, formatUsageTooltip, type GrokUsageSnapshot } from "./usage";
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Grok");
@@ -12,26 +13,49 @@ export function activate(context: vscode.ExtensionContext): void {
     output,
     `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
   );
+  const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
+  usageStatus.name = "Grok usage limits";
+  usageStatus.command = "grokCopilot.showUsage";
+  renderUsageStatus(usageStatus, provider.getUsageSnapshot());
 
   context.subscriptions.push(
     output,
+    usageStatus,
     provider.onDidChangeLanguageModelChatInformation(() => undefined),
+    provider.onDidChangeUsage((usage) => {
+      renderUsageStatus(usageStatus, usage);
+      usageStatus.show();
+    }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     vscode.commands.registerCommand("grokCopilot.signIn", () => signInWithBrowser(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.signInDevice", () => signInWithDevice(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.refreshModels", () => refreshModels(provider)),
+    vscode.commands.registerCommand("grokCopilot.showUsage", () => showUsage(provider, output)),
+    vscode.commands.registerCommand("grokCopilot.openUsage", () => openGrokUsage()),
     vscode.commands.registerCommand("grokCopilot.diagnostics", () => diagnostics(oauth, provider, output)),
-    vscode.commands.registerCommand("grokCopilot.manage", () => manage(oauth, provider, output)),
+    vscode.commands.registerCommand("grokCopilot.manage", () => manage(oauth, provider, output, usageStatus)),
   );
   output.appendLine(`[activate] Grok for Copilot Chat ${context.extension.packageJSON.version} on VS Code ${vscode.version}`);
+  void oauth.hasSession().then((signedIn) => {
+    if (!signedIn) return;
+    usageStatus.show();
+    void provider.refreshUsage().catch((error) => output.appendLine(`[usage] initial refresh failed: ${messageOf(error)}`));
+  });
 }
 
 export function deactivate(): void {}
 
-async function manage(oauth: XaiOAuth, provider: GrokProvider, output: vscode.OutputChannel): Promise<void> {
+async function manage(
+  oauth: XaiOAuth,
+  provider: GrokProvider,
+  output: vscode.OutputChannel,
+  usageStatus: vscode.StatusBarItem,
+): Promise<void> {
   const signedIn = await oauth.hasSession();
   const choices = signedIn
     ? [
+        { label: "$(pulse) Show usage limits", action: "usage" },
+        { label: "$(link-external) Open Grok account usage", action: "openUsage" },
         { label: "$(check) Test xAI connection", action: "test" },
         { label: "$(refresh) Refresh Grok models", action: "refresh" },
         { label: "$(output) Show Grok logs", action: "logs" },
@@ -49,10 +73,14 @@ async function manage(oauth: XaiOAuth, provider: GrokProvider, output: vscode.Ou
   if (picked.action === "signin") await signInWithBrowser(oauth, provider, output);
   else if (picked.action === "device") await signInWithDevice(oauth, provider, output);
   else if (picked.action === "refresh") await refreshModels(provider);
+  else if (picked.action === "usage") await showUsage(provider, output);
+  else if (picked.action === "openUsage") await openGrokUsage();
   else if (picked.action === "logs") output.show(true);
   else if (picked.action === "test") await testConnection(provider, output);
   else if (picked.action === "signout") {
     await oauth.signOut();
+    provider.clearUsage();
+    usageStatus.hide();
     provider.fireDidChange();
     vscode.window.showInformationMessage("Signed out of xAI.");
   }
@@ -80,6 +108,7 @@ async function signInWithBrowser(
       },
     );
     const models = await provider.refreshModels();
+    void provider.refreshUsage().catch((error) => output.appendLine(`[usage] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI. Found ${models.length} Grok models.`);
   } catch (error) {
     attempt?.cancel();
@@ -111,6 +140,7 @@ async function signInWithDevice(oauth: XaiOAuth, provider: GrokProvider, output:
       },
     );
     const models = await provider.refreshModels();
+    void provider.refreshUsage().catch((error) => output.appendLine(`[usage] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI. Found ${models.length} Grok models.`);
   } catch (error) {
     const message = messageOf(error);
@@ -140,6 +170,34 @@ async function testConnection(provider: GrokProvider, output: vscode.OutputChann
     output.appendLine(`[test] ${messageOf(error)}`);
     vscode.window.showErrorMessage(`xAI connection test failed: ${messageOf(error)}`);
   }
+}
+
+async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): Promise<void> {
+  let snapshot = provider.getUsageSnapshot();
+  try {
+    snapshot = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: "Refreshing Grok usage limits…" },
+      () => provider.refreshUsage(),
+    );
+  } catch (error) {
+    output.appendLine(`[usage] refresh failed: ${messageOf(error)}`);
+    if (!snapshot.updatedAt) vscode.window.showWarningMessage(`Unable to refresh Grok usage limits: ${messageOf(error)}`);
+  }
+  const doc = await vscode.workspace.openTextDocument({
+    content: formatUsageMarkdown(snapshot),
+    language: "markdown",
+  });
+  await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside, true);
+}
+
+async function openGrokUsage(): Promise<void> {
+  const opened = await vscode.env.openExternal(vscode.Uri.parse("https://grok.com/?_s=usage"));
+  if (!opened) vscode.window.showWarningMessage("VS Code could not open the Grok Usage page.");
+}
+
+function renderUsageStatus(item: vscode.StatusBarItem, snapshot: GrokUsageSnapshot): void {
+  item.text = formatUsageStatusBar(snapshot);
+  item.tooltip = formatUsageTooltip(snapshot);
 }
 
 async function diagnostics(

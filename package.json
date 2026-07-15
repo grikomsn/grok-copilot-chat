@@ -54,6 +54,14 @@
         "title": "Grok: Refresh Models"
       },
       {
+        "command": "grokCopilot.showUsage",
+        "title": "Grok: Show Usage Limits"
+      },
+      {
+        "command": "grokCopilot.openUsage",
+        "title": "Grok: Open Account Usage"
+      },
+      {
         "command": "grokCopilot.diagnostics",
         "title": "Grok: Show Diagnostics"
       }
