@@ -1,5 +1,11 @@
 import * as vscode from "vscode";
 import { messageOf } from "./errors";
+import {
+  applyReasoningEffort,
+  buildModelConfigurationSchema,
+  resolveReasoningEffort,
+  type ReasoningEffort,
+} from "./model-options";
 import { XaiOAuth } from "./oauth";
 import { ChatCompletionStreamParser, type ChatStreamEvent } from "./sse";
 import {
@@ -117,22 +123,30 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         this.output.appendLine(`[models] discovery failed; using cached/fallback list: ${messageOf(error)}`);
       }
     }
-    return this.models.map((id) => ({
-      id,
-      rawModelId: id,
-      name: formatModelName(id),
-      family: `xai-${id}`,
-      version: "1.0.0",
-      detail: "xAI OAuth",
-      tooltip: `${id} via the xAI API`,
-      maxInputTokens: MAX_INPUT_TOKENS,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      isUserSelectable: true,
-      capabilities: {
-        imageInput: true,
-        toolCalling: true,
-      },
-    }));
+    return this.models.map((id) => {
+      const defaultEffort = resolveReasoningEffort(
+        id,
+        undefined,
+        this.configuration.get("reasoningEffort", "high"),
+      );
+      return {
+        id,
+        rawModelId: id,
+        name: formatModelName(id),
+        family: `xai-${id}`,
+        version: "1.0.0",
+        detail: "xAI OAuth",
+        tooltip: `${id} via the xAI API`,
+        maxInputTokens: MAX_INPUT_TOKENS,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        isUserSelectable: true,
+        configurationSchema: buildModelConfigurationSchema(id, defaultEffort),
+        capabilities: {
+          imageInput: true,
+          toolCalling: true,
+        },
+      };
+    });
   }
 
   async provideLanguageModelChatResponse(
@@ -142,7 +156,12 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    const requestBody = buildRequest(model.rawModelId, messages, options);
+    const reasoningEffort = resolveReasoningEffort(
+      model.rawModelId,
+      options.modelConfiguration,
+      this.configuration.get("reasoningEffort", "high"),
+    );
+    const requestBody = buildRequest(model.rawModelId, messages, options, reasoningEffort);
     let accessToken = await this.oauth.getAccessToken();
     let response = await this.sendRequest(accessToken, requestBody, token);
     if (response.status === 401) {
@@ -153,7 +172,9 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
     if (!response.body) throw new Error("xAI returned an empty response stream");
 
-    if (this.debugLogging) this.output.appendLine(`[request] model=${model.rawModelId} initiator=${options.requestInitiator ?? "unknown"}`);
+    if (this.debugLogging) {
+      this.output.appendLine(`[request] model=${model.rawModelId} effort=${reasoningEffort ?? "model-default"} initiator=${options.requestInitiator ?? "unknown"}`);
+    }
 
     const parser = new ChatCompletionStreamParser();
     let finalUsage: Record<string, unknown> | undefined;
@@ -291,6 +312,7 @@ function buildRequest(
   model: string,
   messages: readonly vscode.LanguageModelChatRequestMessage[],
   options: vscode.ProvideLanguageModelChatResponseOptions,
+  reasoningEffort?: ReasoningEffort,
 ): Record<string, unknown> {
   const maxTokens = grokConfiguration().get("maxOutputTokens", MAX_OUTPUT_TOKENS);
   const tools = (options.tools ?? []).map((tool) => ({
@@ -301,14 +323,14 @@ function buildRequest(
       parameters: sanitizeSchema(tool.inputSchema),
     },
   }));
-  return {
+  return applyReasoningEffort({
     model,
     messages: normalizeMessages(messages.flatMap(convertMessage)),
     stream: true,
     stream_options: { include_usage: true },
     max_tokens: maxTokens,
     ...(tools.length ? { tools, tool_choice: toolMode(options.toolMode), parallel_tool_calls: true } : {}),
-  };
+  }, reasoningEffort);
 }
 
 function grokConfiguration(): vscode.WorkspaceConfiguration {

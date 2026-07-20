@@ -2,7 +2,7 @@
   "name": "grok-copilot-chat",
   "displayName": "Grok for GitHub Copilot Chat",
   "description": "Use xAI Grok models in GitHub Copilot Chat with xAI OAuth.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "grikomsn",
   "icon": "assets/icon.png",
   "license": "MIT",
@@ -69,6 +69,25 @@
     "configuration": {
       "title": "Grok for Copilot Chat",
       "properties": {
+        "grokCopilot.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "default": "high",
+          "enumDescriptions": [
+            "Disable reasoning when supported by the selected model",
+            "Faster responses with lighter reasoning",
+            "Balanced speed and reasoning depth",
+            "Greater reasoning depth for complex problems",
+            "Extra-high effort for supported multi-agent models"
+          ],
+          "description": "Default Grok reasoning effort. A model-picker selection overrides this value, and each model only shows supported levels."
+        },
         "grokCopilot.maxOutputTokens": {
           "type": "number",
           "default": 16384,
