@@ -44,4 +44,9 @@ Use **Grok: Manage xAI Connection** to inspect usage, test the connection, refre
 - [OAuth and security](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/security.md)
 - [Development and releases](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/development.md)
 
+## Related projects
+
+- [Codex Bridge for Copilot Chat](https://github.com/grikomsn/openai-oauth-copilot-chat) — Use OpenAI Codex models in Copilot Chat with a ChatGPT Plus or Pro subscription.
+- [Poolside for GitHub Copilot Chat](https://github.com/grikomsn/poolside-copilot-chat) — Use hosted Poolside coding models directly from the GitHub Copilot Chat model picker in Visual Studio Code.
+
 Unofficial project; not affiliated with xAI, GitHub, or Microsoft. xAI account limits and charges still apply. Licensed under [MIT](LICENSE).
