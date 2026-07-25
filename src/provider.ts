@@ -6,6 +6,16 @@ import {
   resolveReasoningEffort,
   type ReasoningEffort,
 } from "./model-options";
+import {
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  FALLBACK_MODELS,
+  cloneDiscoveredModel,
+  formatDiscoveredModels,
+  parseDiscoveredModels,
+  pickTestModel,
+  resolveModelTokenLimits,
+  type DiscoveredModel,
+} from "./model-limits";
 import { XaiOAuth } from "./oauth";
 import { ChatCompletionStreamParser, type ChatStreamEvent } from "./sse";
 import {
@@ -17,14 +27,6 @@ import {
 } from "./usage";
 
 const API_BASE = "https://api.x.ai/v1";
-const FALLBACK_MODELS = [
-  "grok-4.5",
-  "grok-code-fast-1",
-  "grok-4-1-fast-reasoning",
-  "grok-4-1-fast-non-reasoning",
-];
-const MAX_INPUT_TOKENS = 245_760;
-const MAX_OUTPUT_TOKENS = 16_384;
 
 export interface GrokModel extends vscode.LanguageModelChatInformation {
   rawModelId: string;
@@ -54,7 +56,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private readonly usageEmitter = new vscode.EventEmitter<GrokUsageSnapshot>();
   readonly onDidChangeLanguageModelChatInformation = this.changeEmitter.event;
   readonly onDidChangeUsage = this.usageEmitter.event;
-  private models = [...FALLBACK_MODELS];
+  private models: DiscoveredModel[] = FALLBACK_MODELS.map(cloneDiscoveredModel);
   private lastModelRefreshAt = 0;
   private usage: GrokUsageSnapshot;
 
@@ -90,24 +92,20 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   async refreshModels(): Promise<string[]> {
     const models = await this.discoverModels();
     this.changeEmitter.fire();
-    return models;
+    return models.map((model) => model.id);
   }
 
-  private async discoverModels(): Promise<string[]> {
+  private async discoverModels(): Promise<DiscoveredModel[]> {
     const token = await this.oauth.getAccessToken();
     const response = await fetch(`${API_BASE}/models`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     });
     this.captureApiLimits(response.headers, "models");
     if (!response.ok) throw await apiError("Unable to list xAI models", response);
-    const body = (await response.json()) as { data?: Array<{ id?: string }> };
-    const discovered = (body.data ?? [])
-      .map((model) => model.id)
-      .filter((id): id is string => Boolean(id && isChatModel(id)))
-      .sort();
+    const discovered = parseDiscoveredModels(await response.json());
     if (discovered.length) this.models = discovered;
     this.lastModelRefreshAt = Date.now();
-    this.output.appendLine(`[models] ${this.models.join(", ")}`);
+    this.output.appendLine(`[models] ${formatDiscoveredModels(this.models)}`);
     return this.models;
   }
 
@@ -123,24 +121,26 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         this.output.appendLine(`[models] discovery failed; using cached/fallback list: ${messageOf(error)}`);
       }
     }
-    return this.models.map((id) => {
+    const configuredMaxOutput = this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS);
+    return this.models.map((model) => {
+      const limits = resolveModelTokenLimits(model.contextLength, configuredMaxOutput);
       const defaultEffort = resolveReasoningEffort(
-        id,
+        model.id,
         undefined,
         this.configuration.get("reasoningEffort", "high"),
       );
       return {
-        id,
-        rawModelId: id,
-        name: formatModelName(id),
-        family: `xai-${id}`,
+        id: model.id,
+        rawModelId: model.id,
+        name: formatModelName(model.id),
+        family: `xai-${model.id}`,
         version: "1.0.0",
         detail: "xAI OAuth",
-        tooltip: `${id} via the xAI API`,
-        maxInputTokens: MAX_INPUT_TOKENS,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        tooltip: `${model.id} · ${limits.contextLength.toLocaleString()} context · xAI API`,
+        maxInputTokens: limits.maxInputTokens,
+        maxOutputTokens: limits.maxOutputTokens,
         isUserSelectable: true,
-        configurationSchema: buildModelConfigurationSchema(id, defaultEffort),
+        configurationSchema: buildModelConfigurationSchema(model.id, defaultEffort),
         capabilities: {
           imageInput: true,
           toolCalling: true,
@@ -161,7 +161,13 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       options.modelConfiguration,
       this.configuration.get("reasoningEffort", "high"),
     );
-    const requestBody = buildRequest(model.rawModelId, messages, options, reasoningEffort);
+    const requestBody = buildRequest(
+      model.rawModelId,
+      messages,
+      options,
+      reasoningEffort,
+      model.maxOutputTokens,
+    );
     let accessToken = await this.oauth.getAccessToken();
     let response = await this.sendRequest(accessToken, requestBody, token);
     if (response.status === 401) {
@@ -210,9 +216,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
 
   async testConnection(): Promise<{ model: string; text: string }> {
     const accessToken = await this.oauth.getAccessToken();
-    const model = FALLBACK_MODELS.find((candidate) => this.models.includes(candidate))
-      ?? this.models[0]
-      ?? FALLBACK_MODELS[0];
+    const model = pickTestModel(this.models);
     const response = await fetch(`${API_BASE}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -313,8 +317,12 @@ function buildRequest(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
   options: vscode.ProvideLanguageModelChatResponseOptions,
   reasoningEffort?: ReasoningEffort,
+  maxOutputTokens?: number,
 ): Record<string, unknown> {
-  const maxTokens = grokConfiguration().get("maxOutputTokens", MAX_OUTPUT_TOKENS);
+  const configuredMaxOutput = grokConfiguration().get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS);
+  const maxTokens = typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
+    ? Math.floor(maxOutputTokens)
+    : configuredMaxOutput;
   const tools = (options.tools ?? []).map((tool) => ({
     type: "function",
     function: {
@@ -434,11 +442,6 @@ function parseArguments(value: string): object {
   } catch {
     return { value };
   }
-}
-
-function isChatModel(id: string): boolean {
-  const value = id.toLowerCase();
-  return value.startsWith("grok-") && !/(imagine|image|video|voice|embedding)/.test(value);
 }
 
 function formatModelName(id: string): string {
