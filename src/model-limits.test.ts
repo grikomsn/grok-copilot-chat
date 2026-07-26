@@ -52,9 +52,25 @@ test("ignores invalid context_length and non-chat entries", () => {
 
   assert.deepEqual(models, [
     { id: "grok-4.3" },
-    { id: "grok-4.5" },
+    { id: "grok-4.5", contextLength: 500_000 },
     { id: "grok-4.5-latest" },
     { id: "grok-build-0.1", contextLength: 256_000 },
+  ]);
+});
+
+test("uses per-model fallback context lengths for partial discovery metadata", () => {
+  const models = parseDiscoveredModels({
+    data: [
+      { id: "grok-4.5" },
+      { id: "grok-code-fast-1", context_length: "invalid" },
+      { id: "grok-future" },
+    ],
+  });
+
+  assert.deepEqual(models, [
+    { id: "grok-4.5", contextLength: 500_000 },
+    { id: "grok-code-fast-1", contextLength: 256_000 },
+    { id: "grok-future" },
   ]);
 });
 
@@ -74,8 +90,8 @@ test("does not treat long_context_threshold as the context window", () => {
       },
     ],
   });
-  assert.deepEqual(models, [{ id: "grok-4.5" }]);
-  assert.equal(resolveModelTokenLimits(models[0]?.contextLength, 16_384).contextLength, 256_000);
+  assert.deepEqual(models, [{ id: "grok-4.5", contextLength: 500_000 }]);
+  assert.equal(resolveModelTokenLimits(models[0]?.contextLength, 16_384).contextLength, 500_000);
 });
 
 test("reserves configured output headroom from the full context window", () => {

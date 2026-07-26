@@ -30,6 +30,7 @@ const API_BASE = "https://api.x.ai/v1";
 
 export interface GrokModel extends vscode.LanguageModelChatInformation {
   rawModelId: string;
+  contextLength: number;
 }
 
 interface ApiMessage {
@@ -139,6 +140,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         tooltip: `${model.id} · ${limits.contextLength.toLocaleString()} context · xAI API`,
         maxInputTokens: limits.maxInputTokens,
         maxOutputTokens: limits.maxOutputTokens,
+        contextLength: limits.contextLength,
         isUserSelectable: true,
         configurationSchema: buildModelConfigurationSchema(model.id, defaultEffort),
         capabilities: {
@@ -166,7 +168,10 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       messages,
       options,
       reasoningEffort,
-      model.maxOutputTokens,
+      resolveModelTokenLimits(
+        model.contextLength,
+        this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS),
+      ).maxOutputTokens,
     );
     let accessToken = await this.oauth.getAccessToken();
     let response = await this.sendRequest(accessToken, requestBody, token);

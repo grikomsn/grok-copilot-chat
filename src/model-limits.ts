@@ -48,7 +48,9 @@ function toDiscoveredModel(entry: unknown): DiscoveredModel | undefined {
   const id = (entry as { id?: unknown }).id;
   if (typeof id !== "string" || !id || !isChatModel(id)) return undefined;
 
-  const contextLength = readPositiveInt((entry as { context_length?: unknown }).context_length);
+  const fallback = FALLBACK_MODELS.find((model) => model.id === id);
+  const contextLength = readPositiveInt((entry as { context_length?: unknown }).context_length)
+    ?? fallback?.contextLength;
   return contextLength === undefined ? { id } : { id, contextLength };
 }
 
