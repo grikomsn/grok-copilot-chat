@@ -37,7 +37,12 @@ export function activate(context: vscode.ExtensionContext): void {
       void context.globalState.update(USAGE_STATE_KEY, usage);
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("grokCopilot.reasoningEffort")) provider.fireDidChange();
+      if (
+        event.affectsConfiguration("grokCopilot.reasoningEffort")
+        || event.affectsConfiguration("grokCopilot.maxOutputTokens")
+      ) {
+        provider.fireDidChange();
+      }
     }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     vscode.commands.registerCommand("grokCopilot.signIn", () => signInWithBrowser(oauth, provider, output)),
