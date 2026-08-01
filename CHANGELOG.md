@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+### Patch Changes
+
+- 6711d10: Refresh the fallback Grok model metadata to include current xAI models and remove retired model slugs.
+
 ## 0.3.1
 
 ### Patch Changes
