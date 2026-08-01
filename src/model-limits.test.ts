@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  FALLBACK_MODELS,
   parseDiscoveredModels,
   resolveModelTokenLimits,
 } from "./model-limits";
+
+test("keeps fallback models aligned with the current xAI catalog", () => {
+  assert.deepEqual(FALLBACK_MODELS, [
+    { id: "grok-4.5", contextLength: 500_000 },
+    { id: "grok-4.3", contextLength: 1_000_000 },
+    { id: "grok-build-0.1", contextLength: 256_000 },
+    { id: "grok-4.20", contextLength: 1_000_000 },
+    { id: "grok-4.20-non-reasoning", contextLength: 1_000_000 },
+    { id: "grok-4.20-multi-agent", contextLength: 1_000_000 },
+  ]);
+});
 
 test("parses chat models and context_length from xAI /v1/models payloads", () => {
   const models = parseDiscoveredModels({
@@ -51,7 +63,7 @@ test("ignores invalid context_length and non-chat entries", () => {
   });
 
   assert.deepEqual(models, [
-    { id: "grok-4.3" },
+    { id: "grok-4.3", contextLength: 1_000_000 },
     { id: "grok-4.5", contextLength: 500_000 },
     { id: "grok-4.5-latest" },
     { id: "grok-build-0.1", contextLength: 256_000 },
@@ -62,15 +74,33 @@ test("uses per-model fallback context lengths for partial discovery metadata", (
   const models = parseDiscoveredModels({
     data: [
       { id: "grok-4.5" },
-      { id: "grok-code-fast-1", context_length: "invalid" },
+      { id: "grok-4.3" },
+      { id: "grok-build-0.1", context_length: "invalid" },
+      { id: "grok-4.20-multi-agent" },
       { id: "grok-future" },
     ],
   });
 
   assert.deepEqual(models, [
+    { id: "grok-4.20-multi-agent", contextLength: 1_000_000 },
+    { id: "grok-4.3", contextLength: 1_000_000 },
     { id: "grok-4.5", contextLength: 500_000 },
-    { id: "grok-code-fast-1", contextLength: 256_000 },
+    { id: "grok-build-0.1", contextLength: 256_000 },
     { id: "grok-future" },
+  ]);
+});
+
+test("does not retain retired model metadata as fallback defaults", () => {
+  const models = parseDiscoveredModels({
+    data: [
+      { id: "grok-code-fast-1" },
+      { id: "grok-4-1-fast-reasoning" },
+    ],
+  });
+
+  assert.deepEqual(models, [
+    { id: "grok-4-1-fast-reasoning" },
+    { id: "grok-code-fast-1" },
   ]);
 });
 
