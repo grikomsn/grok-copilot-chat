@@ -16,8 +16,9 @@ import {
   resolveModelTokenLimits,
   type DiscoveredModel,
 } from "./model-limits";
-import { XaiOAuth } from "./oauth";
-import { ChatCompletionStreamParser, type ChatStreamEvent } from "./sse";
+import { XaiOAuth, type OAuthSession } from "./oauth";
+import { XAI_OAUTH_API_BASE, buildXaiOAuthHeaders } from "./provider-transport";
+import { ChatCompletionStreamParser, validateStreamCompletion, type ChatStreamEvent } from "./sse";
 import {
   mergeUsageSnapshot,
   parseApiRateLimitHeaders,
@@ -25,8 +26,6 @@ import {
   toProviderUsagePayload,
   type GrokUsageSnapshot,
 } from "./usage";
-
-const API_BASE = "https://api.x.ai/v1";
 
 export interface GrokModel extends vscode.LanguageModelChatInformation {
   rawModelId: string;
@@ -50,6 +49,11 @@ interface ApiToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+}
+
+interface PendingResponse {
+  response: Response;
+  cleanup(): void;
 }
 
 export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel> {
@@ -97,9 +101,14 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 
   private async discoverModels(): Promise<DiscoveredModel[]> {
-    const token = await this.oauth.getAccessToken();
-    const response = await fetch(`${API_BASE}/models`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    const session = await this.oauth.getSession();
+    const response = await fetch(`${XAI_OAUTH_API_BASE}/models`, {
+      headers: buildXaiOAuthHeaders({
+        accessToken: session.accessToken,
+        userId: session.userId,
+        email: session.email,
+        accept: "application/json",
+      }),
     });
     this.captureApiLimits(response.headers, "models");
     if (!response.ok) throw await apiError("Unable to list xAI models", response);
@@ -144,9 +153,10 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         isUserSelectable: true,
         configurationSchema: buildModelConfigurationSchema(model.id, defaultEffort),
         capabilities: {
-          imageInput: true,
-          toolCalling: true,
+          ...(model.imageInput === undefined ? {} : { imageInput: model.imageInput }),
+          ...(model.toolCalling === undefined ? {} : { toolCalling: model.toolCalling }),
         },
+        requiresAuthorization: { label: "Sign in to xAI" },
       };
     });
   }
@@ -173,41 +183,60 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS),
       ).maxOutputTokens,
     );
-    let accessToken = await this.oauth.getAccessToken();
-    let response = await this.sendRequest(accessToken, requestBody, token);
-    if (response.status === 401) {
-      accessToken = await this.oauth.getAccessToken(true);
-      response = await this.sendRequest(accessToken, requestBody, token);
+    let session = await this.oauth.getSession();
+    let pending = await this.sendRequest(session, requestBody, token);
+    if (pending.response.status === 401) {
+      pending.cleanup();
+      session = await this.oauth.getSession(true);
+      pending = await this.sendRequest(session, requestBody, token);
     }
+    const response = pending.response;
     this.captureApiLimits(response.headers, `chat:${model.rawModelId}`);
-    if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
-    if (!response.body) throw new Error("xAI returned an empty response stream");
+    try {
+      if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
+      if (!response.body) throw new Error("xAI returned an empty response stream");
 
-    if (this.debugLogging) {
-      this.output.appendLine(`[request] model=${model.rawModelId} effort=${reasoningEffort ?? "model-default"} initiator=${options.requestInitiator ?? "unknown"}`);
-    }
+      if (this.debugLogging) {
+        this.output.appendLine(`[request] model=${model.rawModelId} effort=${reasoningEffort ?? "model-default"} initiator=${options.requestInitiator ?? "unknown"}`);
+      }
 
-    const parser = new ChatCompletionStreamParser();
-    let finalUsage: Record<string, unknown> | undefined;
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      if (token.isCancellationRequested) {
-        await reader.cancel();
-        return;
+      const parser = new ChatCompletionStreamParser();
+      let finalUsage: Record<string, unknown> | undefined;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      try {
+        while (true) {
+          if (token.isCancellationRequested) {
+            await reader.cancel();
+            return;
+          }
+          const result = await reader.read();
+          if (result.done) break;
+          for (const event of parser.push(decoder.decode(result.value, { stream: true }))) {
+            reportEvent(event, progress);
+            if (event.usage) finalUsage = event.usage;
+          }
+        }
+        for (const event of parser.push(decoder.decode())) {
+          reportEvent(event, progress);
+          if (event.usage) finalUsage = event.usage;
+        }
+        for (const event of parser.finish()) {
+          reportEvent(event, progress);
+          if (event.usage) finalUsage = event.usage;
+        }
+        validateStreamCompletion(parser.finishReason);
+      } catch (error) {
+        if (token.isCancellationRequested) return;
+        if (isAbortError(error)) throw new Error("xAI response stream timed out before completing");
+        throw error;
+      } finally {
+        reader.releaseLock();
       }
-      const result = await reader.read();
-      if (result.done) break;
-      for (const event of parser.push(decoder.decode(result.value, { stream: true }))) {
-        reportEvent(event, progress);
-        if (event.usage) finalUsage = event.usage;
-      }
+      if (finalUsage) this.captureRequestUsage(finalUsage, model.rawModelId);
+    } finally {
+      pending.cleanup();
     }
-    for (const event of parser.finish()) {
-      reportEvent(event, progress);
-      if (event.usage) finalUsage = event.usage;
-    }
-    if (finalUsage) this.captureRequestUsage(finalUsage, model.rawModelId);
   }
 
   async provideTokenCount(
@@ -220,11 +249,17 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 
   async testConnection(): Promise<{ model: string; text: string }> {
-    const accessToken = await this.oauth.getAccessToken();
+    const session = await this.oauth.getSession();
     const model = pickTestModel(this.models);
-    const response = await fetch(`${API_BASE}/chat/completions`, {
+    const response = await fetch(`${XAI_OAUTH_API_BASE}/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      headers: buildXaiOAuthHeaders({
+        accessToken: session.accessToken,
+        userId: session.userId,
+        email: session.email,
+        accept: "application/json",
+        contentType: "application/json",
+      }),
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: "Reply with exactly: Grok connection verified" }],
@@ -255,10 +290,10 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 
   private async sendRequest(
-    accessToken: string,
+    session: OAuthSession,
     requestBody: Record<string, unknown>,
     cancellation: vscode.CancellationToken,
-  ): Promise<Response> {
+  ): Promise<PendingResponse> {
     const controller = new AbortController();
     const timeoutSeconds = Math.max(
       10,
@@ -266,21 +301,33 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     );
     const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
     const listener = cancellation.onCancellationRequested(() => controller.abort());
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearTimeout(timeout);
+      listener.dispose();
+    };
     try {
-      return await fetch(`${API_BASE}/chat/completions`, {
+      const response = await fetch(`${XAI_OAUTH_API_BASE}/chat/completions`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          "User-Agent": this.userAgent,
+          ...buildXaiOAuthHeaders({
+            accessToken: session.accessToken,
+            userId: session.userId,
+            email: session.email,
+            contentType: "application/json",
+            accept: "text/event-stream",
+            userAgent: this.userAgent,
+          }),
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
-    } finally {
-      clearTimeout(timeout);
-      listener.dispose();
+      return { response, cleanup };
+    } catch (error) {
+      cleanup();
+      throw error;
     }
   }
 
@@ -463,4 +510,8 @@ async function apiError(prefix: string, response: Response): Promise<Error> {
     // Use the response text as-is.
   }
   return new Error(`${prefix} (HTTP ${response.status})${detail ? `: ${detail.slice(0, 1000)}` : ""}`);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }

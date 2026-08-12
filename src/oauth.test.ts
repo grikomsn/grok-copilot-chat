@@ -78,13 +78,21 @@ test("device OAuth polls pending responses and stores the session", async () => 
       }
       tokenCalls++;
       if (tokenCalls === 1) return Response.json({ error: "authorization_pending" }, { status: 400 });
-      return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 });
+      const payload = Buffer.from(JSON.stringify({ sub: "user-1", email: "user@example.com" })).toString("base64url");
+      return Response.json({
+        access_token: "access",
+        refresh_token: "refresh",
+        expires_in: 3600,
+        id_token: `header.${payload}.signature`,
+      });
     },
   });
 
   const device = await client.requestDeviceCode();
   const session = await client.completeDeviceSignIn(device);
   assert.equal(session.accessToken, "access");
+  assert.equal(session.userId, "user-1");
+  assert.equal(session.email, "user@example.com");
   assert.equal(tokenCalls, 2);
   assert.ok(store.values.has(XAI_SESSION_SECRET));
 });

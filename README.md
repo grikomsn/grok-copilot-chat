@@ -13,7 +13,7 @@
   <a href="https://github.com/grikomsn/grok-copilot-chat/blob/main/LICENSE"><img src="https://img.shields.io/github/license/grikomsn/grok-copilot-chat?style=flat-square" alt="MIT license"></a>
 </p>
 
-This extension is a native VS Code `LanguageModelChatProvider`. It authenticates with xAI, discovers available models, and streams responses from `api.x.ai` into Copilot Chat without a local proxy.
+This extension is a native VS Code `LanguageModelChatProvider`. It authenticates with xAI, discovers available models, and streams OAuth-backed responses through xAI's Grok CLI inference service into Copilot Chat without a local proxy.
 
 ## Highlights
 

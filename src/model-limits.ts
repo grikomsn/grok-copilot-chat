@@ -5,6 +5,9 @@ export interface DiscoveredModel {
   id: string;
   /** Full model context window from xAI `context_length`, when known. */
   contextLength?: number;
+  /** Explicit capability metadata from xAI or a verified fallback profile. */
+  imageInput?: boolean;
+  toolCalling?: boolean;
 }
 
 export interface ModelTokenLimits {
@@ -14,12 +17,13 @@ export interface ModelTokenLimits {
 }
 
 export const FALLBACK_MODELS: readonly DiscoveredModel[] = [
-  { id: "grok-4.5", contextLength: 500_000 },
-  { id: "grok-4.3", contextLength: 1_000_000 },
-  { id: "grok-build-0.1", contextLength: DEFAULT_CONTEXT_LENGTH },
-  { id: "grok-4.20", contextLength: 1_000_000 },
-  { id: "grok-4.20-non-reasoning", contextLength: 1_000_000 },
-  { id: "grok-4.20-multi-agent", contextLength: 1_000_000 },
+  { id: "grok-4.6", contextLength: 500_000, imageInput: true, toolCalling: true },
+  { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
+  { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
+  { id: "grok-build-0.1", contextLength: DEFAULT_CONTEXT_LENGTH, toolCalling: true },
+  { id: "grok-4.20", contextLength: 1_000_000, toolCalling: true },
+  { id: "grok-4.20-non-reasoning", contextLength: 1_000_000, toolCalling: true },
+  { id: "grok-4.20-multi-agent", contextLength: 1_000_000, toolCalling: true },
 ];
 
 /** Parse chat models and context windows from an xAI `/v1/models` response body. */
@@ -47,13 +51,28 @@ function readModelEntries(body: unknown): unknown[] | undefined {
 function toDiscoveredModel(entry: unknown): DiscoveredModel | undefined {
   if (!entry || typeof entry !== "object") return undefined;
 
-  const id = (entry as { id?: unknown }).id;
+  const record = entry as Record<string, unknown>;
+  const id = record.id;
   if (typeof id !== "string" || !id || !isChatModel(id)) return undefined;
 
   const fallback = FALLBACK_MODELS.find((model) => model.id === id);
-  const contextLength = readPositiveInt((entry as { context_length?: unknown }).context_length)
+  const capabilities = isRecord(record.capabilities) ? record.capabilities : undefined;
+  const imageInput = readOptionalBoolean(
+    [record, capabilities],
+    ["image_input", "imageInput", "vision", "supports_vision", "supportsVision"],
+  ) ?? fallback?.imageInput;
+  const toolCalling = readOptionalBoolean(
+    [record, capabilities],
+    ["tool_calling", "toolCalling", "supports_tools", "supportsTools", "supports_tool_calling"],
+  ) ?? fallback?.toolCalling;
+  const contextLength = readPositiveInt(record.context_length)
     ?? fallback?.contextLength;
-  return contextLength === undefined ? { id } : { id, contextLength };
+  return {
+    id,
+    ...(contextLength === undefined ? {} : { contextLength }),
+    ...(imageInput === undefined ? {} : { imageInput }),
+    ...(toolCalling === undefined ? {} : { toolCalling }),
+  };
 }
 
 /**
@@ -72,9 +91,12 @@ export function resolveModelTokenLimits(
 }
 
 export function cloneDiscoveredModel(model: DiscoveredModel): DiscoveredModel {
-  return model.contextLength === undefined
-    ? { id: model.id }
-    : { id: model.id, contextLength: model.contextLength };
+  return {
+    id: model.id,
+    ...(model.contextLength === undefined ? {} : { contextLength: model.contextLength }),
+    ...(model.imageInput === undefined ? {} : { imageInput: model.imageInput }),
+    ...(model.toolCalling === undefined ? {} : { toolCalling: model.toolCalling }),
+  };
 }
 
 export function formatDiscoveredModels(models: readonly DiscoveredModel[]): string {
@@ -92,6 +114,22 @@ function readPositiveInt(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const normalized = Math.floor(value);
   return normalized > 0 ? normalized : undefined;
+}
+
+function readOptionalBoolean(
+  sources: readonly (Record<string, unknown> | undefined)[],
+  keys: readonly string[],
+): boolean | undefined {
+  for (const source of sources) {
+    for (const key of keys) {
+      if (typeof source?.[key] === "boolean") return source[key] as boolean;
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isChatModel(id: string): boolean {
