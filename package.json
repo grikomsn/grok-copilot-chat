@@ -135,5 +135,9 @@
     "@types/vscode": "^1.125.0",
     "@vscode/vsce": "^3.9.2",
     "typescript": "^6.0.3"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.0.9": true,
+    "keytar@7.9.0": true
   }
 }
