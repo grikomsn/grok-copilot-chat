@@ -25,12 +25,35 @@ export interface TrackedApiUsage {
   costUsdTicks: number;
 }
 
+export interface GrokSubscriptionUsage {
+  usagePercent?: number;
+  periodType?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  prepaidBalanceCents?: number;
+  onDemandCapCents?: number;
+  onDemandUsedCents?: number;
+  onDemandEnabled?: boolean;
+  isUnifiedBillingUser?: boolean;
+  subscriptionTier?: string;
+}
+
+export interface GrokAutoTopUpStatus {
+  enabled: boolean;
+  minBeforeHittingSlCents?: number;
+  topupAmountCents?: number;
+  maxAmountPerMonthCents?: number;
+}
+
 export interface GrokUsageSnapshot {
   requests?: LimitBucket;
   tokens?: LimitBucket;
   lastRequest?: ApiRequestUsage;
   tracked?: TrackedApiUsage;
+  subscription?: GrokSubscriptionUsage;
+  autoTopUp?: GrokAutoTopUpStatus;
   apiError?: string;
+  subscriptionError?: string;
   updatedAt?: number;
 }
 
@@ -39,7 +62,7 @@ export interface HeaderReader {
 }
 
 export interface UsageDisplayRow {
-  kind: "spend" | "request" | "requests" | "tokens" | "warning" | "empty";
+  kind: "spend" | "request" | "requests" | "tokens" | "subscription" | "credits" | "autotopup" | "warning" | "empty";
   label: string;
   description: string;
   detail?: string;
@@ -64,6 +87,51 @@ export function parseApiRateLimitHeaders(
   return compactObject({ requests, tokens });
 }
 
+export function parseSubscriptionUsagePayload(raw: unknown): GrokSubscriptionUsage | undefined {
+  const root = isRecord(raw) ? raw : undefined;
+  if (!root) return undefined;
+  const rawConfig = valueOf(root, "config", "billingConfig");
+  const config = isRecord(rawConfig) ? rawConfig : root;
+  const periodValue = valueOf(config, "currentPeriod", "current_period");
+  const period = isRecord(periodValue) ? periodValue : {};
+  const monthlyLimit = readCents(valueOf(config, "monthlyLimit", "monthly_limit"));
+  const used = readCents(valueOf(config, "used"));
+  const usagePercent = readPercent(valueOf(config, "creditUsagePercent", "credit_usage_percent"))
+    ?? (monthlyLimit && monthlyLimit > 0 && used !== undefined
+      ? Math.min(100, Math.max(0, (used / monthlyLimit) * 100))
+      : undefined);
+  const result = compactObject({
+    usagePercent,
+    periodType: readText(valueOf(period, "type", "periodType", "period_type")),
+    periodStart: readText(valueOf(period, "start") ?? valueOf(config, "billingPeriodStart", "billing_period_start")),
+    periodEnd: readText(valueOf(period, "end") ?? valueOf(config, "billingPeriodEnd", "billing_period_end")),
+    prepaidBalanceCents: readCents(valueOf(config, "prepaidBalance", "prepaid_balance")),
+    onDemandCapCents: readCents(valueOf(config, "onDemandCap", "on_demand_cap")),
+    onDemandUsedCents: readCents(valueOf(config, "onDemandUsed", "on_demand_used")),
+    onDemandEnabled: readBoolean(valueOf(root, "onDemandEnabled", "on_demand_enabled")),
+    isUnifiedBillingUser: readBoolean(valueOf(config, "isUnifiedBillingUser", "is_unified_billing_user")),
+    subscriptionTier: readText(valueOf(root, "subscriptionTier", "subscription_tier")),
+  });
+  return Object.keys(result).length ? result : undefined;
+}
+
+export function parseAutoTopUpPayload(raw: unknown): GrokAutoTopUpStatus | undefined {
+  const root = isRecord(raw) ? raw : undefined;
+  if (!root) return undefined;
+  const rawRule = valueOf(root, "rule");
+  const rule = isRecord(rawRule) ? rawRule : root;
+  const hasRule = rawRule !== undefined
+    || ["enabled", "minBeforeHittingSl", "min_before_hitting_sl", "topupAmount", "topup_amount", "maxAmountPerMonth", "max_amount_per_month"]
+      .some((key) => Object.prototype.hasOwnProperty.call(rule, key));
+  if (!hasRule) return undefined;
+  return compactObject({
+    enabled: readBoolean(valueOf(rule, "enabled")) ?? false,
+    minBeforeHittingSlCents: readCents(valueOf(rule, "minBeforeHittingSl", "min_before_hitting_sl")),
+    topupAmountCents: readCents(valueOf(rule, "topupAmount", "topup_amount")),
+    maxAmountPerMonthCents: readCents(valueOf(rule, "maxAmountPerMonth", "max_amount_per_month")),
+  });
+}
+
 export function mergeUsageSnapshot(
   current: GrokUsageSnapshot,
   update: GrokUsageSnapshot,
@@ -73,6 +141,8 @@ export function mergeUsageSnapshot(
     ...update,
     requests: mergeBucket(current.requests, update.requests),
     tokens: mergeBucket(current.tokens, update.tokens),
+    subscription: mergeObject(current.subscription, update.subscription),
+    autoTopUp: mergeObject(current.autoTopUp, update.autoTopUp),
   });
 }
 
@@ -118,6 +188,9 @@ export function formatUsageStatusBar(snapshot: GrokUsageSnapshot): string {
   if (snapshot.tracked?.requests) {
     return `$(graph) Grok ${formatUsdTicks(snapshot.tracked.costUsdTicks)}`;
   }
+  if (snapshot.subscription?.usagePercent !== undefined) {
+    return `$(pulse) Grok ${formatPercent(snapshot.subscription.usagePercent)} weekly`;
+  }
   const bucket = snapshot.requests ?? snapshot.tokens;
   if (!bucket || (bucket.remaining === undefined && bucket.limit === undefined)) {
     if (snapshot.apiError) return "$(warning) Grok API unavailable";
@@ -128,13 +201,16 @@ export function formatUsageStatusBar(snapshot: GrokUsageSnapshot): string {
 }
 
 export function formatUsageTooltip(snapshot: GrokUsageSnapshot, now = Date.now()): string {
-  const lines = ["Grok API activity"];
+  const lines = ["Grok usage and API activity"];
   if (snapshot.tracked) lines.push(`Tracked billed spend: ${formatUsdTicks(snapshot.tracked.costUsdTicks)} across ${snapshot.tracked.requests.toLocaleString()} requests`);
   if (snapshot.lastRequest) lines.push(`Last request: ${formatRequestUsage(snapshot.lastRequest)}`);
   if (snapshot.requests) lines.push(formatBucketLine("Request rate capacity", snapshot.requests, now));
   if (snapshot.tokens) lines.push(formatBucketLine("Token rate capacity", snapshot.tokens, now));
-  if (!hasUsageLimits(snapshot)) lines.push("No live limits observed yet");
+  if (snapshot.subscription) lines.push(formatSubscriptionLine(snapshot.subscription));
+  if (snapshot.autoTopUp) lines.push(`Auto top-up: ${snapshot.autoTopUp.enabled ? "enabled" : "disabled"}`);
+  if (!hasUsageLimits(snapshot) && !snapshot.subscription) lines.push("No live limits observed yet");
   if (snapshot.apiError) lines.push("xAI API limits unavailable");
+  if (snapshot.subscriptionError) lines.push("Grok subscription usage unavailable");
   if (snapshot.updatedAt) lines.push(`Updated ${new Date(snapshot.updatedAt).toLocaleString()}`);
   lines.push("Click for details");
   return lines.join("\n");
@@ -160,12 +236,23 @@ export function formatUsageRows(snapshot: GrokUsageSnapshot, now = Date.now()): 
   }
   if (snapshot.requests) rows.push(bucketRow("requests", "Request rate capacity", snapshot.requests, now));
   if (snapshot.tokens) rows.push(bucketRow("tokens", "Token rate capacity (TPM)", snapshot.tokens, now));
+  if (snapshot.subscription) rows.push(subscriptionRow(snapshot.subscription));
+  if (snapshot.subscription?.prepaidBalanceCents !== undefined) rows.push(creditsRow(snapshot.subscription));
+  if (snapshot.autoTopUp) rows.push(autoTopUpRow(snapshot.autoTopUp));
   if (snapshot.apiError) {
     rows.push({
       kind: "warning",
       label: "xAI API limits unavailable",
       description: "Check API credits or subscription",
       detail: snapshot.apiError,
+    });
+  }
+  if (snapshot.subscriptionError) {
+    rows.push({
+      kind: "warning",
+      label: "Grok subscription usage unavailable",
+      description: "Open Grok Usage in a browser",
+      detail: snapshot.subscriptionError,
     });
   }
   if (!rows.length) {
@@ -227,10 +314,37 @@ function finiteNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+function readCents(value: unknown): number | undefined {
+  const record = isRecord(value) ? value : undefined;
+  const parsed = finiteNumber(record ? valueOf(record, "val", "value", "cents") : value);
+  return parsed === undefined ? undefined : Math.abs(parsed);
+}
+
+function readPercent(value: unknown): number | undefined {
+  const parsed = finiteNumber(value);
+  return parsed === undefined ? undefined : Math.min(100, parsed);
+}
+
+function readText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function mergeBucket<T extends LimitBucket>(current: T | undefined, update: T | undefined): T | undefined {
   if (!current) return update;
   if (!update) return current;
   return { ...current, ...update };
+}
+
+function mergeObject<T extends object>(current: T | undefined, update: T | undefined): T | undefined {
+  if (!current) return update;
+  if (!update) return current;
+  return { ...current, ...update } as T;
 }
 
 function formatBucketLine(label: string, bucket: LimitBucket, now: number): string {
@@ -251,6 +365,68 @@ function bucketRow(
       ? "Transient API throughput capacity from xAI response headers; not account credits or cumulative usage"
       : "Transient tokens-per-minute capacity from xAI response headers; not account credits or cumulative usage",
   };
+}
+
+function subscriptionRow(subscription: GrokSubscriptionUsage): UsageDisplayRow {
+  const period = periodLabel(subscription.periodType);
+  return {
+    kind: "subscription",
+    label: `${period} Grok usage`,
+    description: subscription.usagePercent === undefined
+      ? "Usage data available"
+      : `${formatPercent(subscription.usagePercent)} used`,
+    detail: subscription.periodEnd
+      ? `Resets ${formatDate(subscription.periodEnd)}${subscription.subscriptionTier ? ` · ${subscription.subscriptionTier}` : ""}`
+      : subscription.subscriptionTier,
+  };
+}
+
+function creditsRow(subscription: GrokSubscriptionUsage): UsageDisplayRow {
+  return {
+    kind: "credits",
+    label: "Extra Usage Credits",
+    description: formatUsdCents(subscription.prepaidBalanceCents!),
+    detail: "Used after the included Grok usage pool is exhausted; manage credits in Grok Usage",
+  };
+}
+
+function autoTopUpRow(autoTopUp: GrokAutoTopUpStatus): UsageDisplayRow {
+  const amounts = [
+    autoTopUp.topupAmountCents === undefined ? undefined : `buys ${formatUsdCents(autoTopUp.topupAmountCents)}`,
+    autoTopUp.maxAmountPerMonthCents === undefined ? undefined : `monthly cap ${formatUsdCents(autoTopUp.maxAmountPerMonthCents)}`,
+  ].filter((value): value is string => Boolean(value));
+  return {
+    kind: "autotopup",
+    label: "Auto top-up",
+    description: autoTopUp.enabled ? "Enabled" : "Disabled",
+    detail: amounts.join(" · ") || "Manage auto top-up in Grok Usage",
+  };
+}
+
+function formatSubscriptionLine(subscription: GrokSubscriptionUsage): string {
+  const usage = subscription.usagePercent === undefined ? "usage available" : `${formatPercent(subscription.usagePercent)} used`;
+  const reset = subscription.periodEnd ? `; resets ${formatDate(subscription.periodEnd)}` : "";
+  return `${periodLabel(subscription.periodType)} Grok usage: ${usage}${reset}`;
+}
+
+function periodLabel(value: string | undefined): string {
+  const normalized = value?.toLowerCase() ?? "";
+  if (normalized.includes("monthly")) return "Monthly";
+  if (normalized.includes("weekly")) return "Weekly";
+  return "Subscription";
+}
+
+function formatPercent(value: number): string {
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+}
+
+function formatUsdCents(cents: number): string {
+  return `$${(Math.abs(cents) / 100).toFixed(2)}`;
+}
+
+function formatDate(value: string): string {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
 }
 
 function normalizeApiUsage(raw: Record<string, unknown>): Omit<ApiRequestUsage, "modelId" | "recordedAt"> {
@@ -318,6 +494,13 @@ function trimDecimal(value: number): string {
 
 function compactObject<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
+}
+
+function valueOf(record: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) return record[key];
+  }
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -23,7 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.globalState.get<GrokUsageSnapshot>(USAGE_STATE_KEY) ?? {},
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
-  usageStatus.name = "Grok API activity";
+  usageStatus.name = "Grok usage and API activity";
   usageStatus.command = "grokCopilot.showUsage";
   renderUsageStatus(usageStatus, provider.getUsageSnapshot());
 
@@ -49,6 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grokCopilot.refreshModels", () => refreshModels(provider)),
     vscode.commands.registerCommand("grokCopilot.showUsage", () => showUsage(provider, output)),
     vscode.commands.registerCommand("grokCopilot.openUsage", () => openXaiUsage()),
+    vscode.commands.registerCommand("grokCopilot.openSubscriptionUsage", () => openGrokUsage()),
     vscode.commands.registerCommand("grokCopilot.diagnostics", () => diagnostics(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.manage", () => manage(oauth, provider, output, usageStatus)),
   );
@@ -70,6 +71,7 @@ async function manage(
   const choices = signedIn
     ? [
         { label: "$(graph) Show API activity and spend", action: "usage" },
+        { label: "$(credit-card) Open Grok subscription usage", action: "openSubscriptionUsage" },
         { label: "$(link-external) Open xAI Console usage", action: "openUsage" },
         { label: "$(check) Test xAI connection", action: "test" },
         { label: "$(refresh) Refresh Grok models", action: "refresh" },
@@ -89,6 +91,7 @@ async function manage(
   else if (picked.action === "device") await signInWithDevice(oauth, provider, output);
   else if (picked.action === "refresh") await refreshModels(provider);
   else if (picked.action === "usage") await showUsage(provider, output);
+  else if (picked.action === "openSubscriptionUsage") await openGrokUsage();
   else if (picked.action === "openUsage") await openXaiUsage();
   else if (picked.action === "logs") output.show(true);
   else if (picked.action === "test") await testConnection(provider, output);
@@ -191,7 +194,7 @@ async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): 
   let snapshot = provider.getUsageSnapshot();
   try {
     snapshot = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: "Refreshing Grok API activity…" },
+      { location: vscode.ProgressLocation.Window, title: "Refreshing Grok usage…" },
       () => provider.refreshUsage(),
     );
   } catch (error) {
@@ -201,6 +204,12 @@ async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): 
   const picked = await vscode.window.showQuickPick<UsageQuickPickItem>([
     ...formatUsageRows(snapshot).map(toUsageQuickPickItem),
     { label: "Account", kind: vscode.QuickPickItemKind.Separator },
+    {
+      label: "$(credit-card) Open Grok subscription usage",
+      description: "Weekly usage, Extra Usage Credits, and auto top-up",
+      action: "openSubscriptionUsage",
+      alwaysShow: true,
+    },
     {
       label: "$(link-external) Open xAI Console usage",
       description: "Account-wide API usage and prepaid credits",
@@ -215,14 +224,20 @@ async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): 
     },
   ], {
     title: snapshot.updatedAt
-      ? `Grok API activity — updated ${new Date(snapshot.updatedAt).toLocaleTimeString()}`
-      : "Grok API activity",
-    placeHolder: "Exact billed spend on this device plus transient API rate capacity",
+      ? `Grok usage and API activity — updated ${new Date(snapshot.updatedAt).toLocaleTimeString()}`
+      : "Grok usage and API activity",
+    placeHolder: "Subscription usage, exact billed spend, and transient API rate capacity",
     matchOnDescription: true,
     matchOnDetail: true,
   });
-  if (picked?.action === "openUsage") await openXaiUsage();
+  if (picked?.action === "openSubscriptionUsage") await openGrokUsage();
+  else if (picked?.action === "openUsage") await openXaiUsage();
   else if (picked?.action === "refresh") await showUsage(provider, output);
+}
+
+async function openGrokUsage(): Promise<void> {
+  const opened = await vscode.env.openExternal(vscode.Uri.parse("https://grok.com?_s=usage"));
+  if (!opened) vscode.window.showWarningMessage("VS Code could not open Grok subscription usage.");
 }
 
 async function openXaiUsage(): Promise<void> {
@@ -236,7 +251,7 @@ function renderUsageStatus(item: vscode.StatusBarItem, snapshot: GrokUsageSnapsh
 }
 
 interface UsageQuickPickItem extends vscode.QuickPickItem {
-  action?: "openUsage" | "refresh";
+  action?: "openSubscriptionUsage" | "openUsage" | "refresh";
 }
 
 function toUsageQuickPickItem(row: UsageDisplayRow): UsageQuickPickItem {
@@ -245,6 +260,9 @@ function toUsageQuickPickItem(row: UsageDisplayRow): UsageQuickPickItem {
     request: "$(history)",
     requests: "$(request-changes)",
     tokens: "$(symbol-numeric)",
+    subscription: "$(calendar)",
+    credits: "$(credit-card)",
+    autotopup: "$(sync)",
     warning: "$(warning)",
     empty: "$(circle-slash)",
   }[row.kind];

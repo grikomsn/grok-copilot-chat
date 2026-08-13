@@ -16,9 +16,12 @@ Both flows use xAI's public Grok CLI OAuth client configuration. No client secre
 The extension sends requests directly to:
 
 - `https://auth.x.ai` for authorization and token operations
-- `https://cli-chat-proxy.grok.com` for OAuth model discovery and chat completions
+- `https://cli-chat-proxy.grok.com` for OAuth model discovery, chat completions, and read-only subscription usage
+- `https://grok.com` only when the user chooses to open the subscription usage page
 
 There is no local proxy or project-operated relay. Prompts, images, tool definitions, and tool results selected by Copilot Chat are sent to xAI as part of chat completion requests. The extension does not use the API-key-only `api.x.ai` route for its OAuth session.
+
+The subscription usage refresh reads the OAuth-backed Grok client billing surface for weekly usage, reset timing, Extra Usage Credits, and auto top-up status. It never purchases credits, changes auto top-up, or redeems a reset. That account surface is private to the Grok client service and may change independently of the public xAI API.
 
 ## Logging
 

@@ -4,6 +4,8 @@ export const XAI_GROK_CLIENT_IDENTIFIER = "grok-shell";
 export const XAI_GROK_CLIENT_VERSION = "1.0.3";
 export const XAI_GROK_CLIENT_MODE = "interactive";
 export const XAI_AUTHENTICATE_RESPONSE = "authenticate-response";
+export const XAI_SUBSCRIPTION_BILLING_PATH = "/billing?format=credits";
+export const XAI_AUTO_TOPUP_PATH = "/auto-topup-rule";
 
 export interface XaiOAuthHeaderOptions {
   accessToken: string;

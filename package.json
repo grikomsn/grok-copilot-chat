@@ -62,6 +62,10 @@
         "title": "Grok: Open xAI Console Usage"
       },
       {
+        "command": "grokCopilot.openSubscriptionUsage",
+        "title": "Grok: Open Subscription Usage"
+      },
+      {
         "command": "grokCopilot.diagnostics",
         "title": "Grok: Show Diagnostics"
       }
