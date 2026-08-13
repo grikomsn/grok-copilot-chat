@@ -76,7 +76,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   constructor(
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
-    private readonly userAgent: string,
     initialUsage: GrokUsageSnapshot = {},
   ) {
     this.usage = initialUsage;
@@ -318,7 +317,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
             email: session.email,
             contentType: "application/json",
             accept: "text/event-stream",
-            userAgent: this.userAgent,
           }),
         },
         body: JSON.stringify(requestBody),

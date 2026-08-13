@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  XAI_AUTHENTICATE_RESPONSE,
   XAI_GROK_CLIENT_IDENTIFIER,
+  XAI_GROK_CLIENT_MODE,
   XAI_GROK_CLIENT_VERSION,
   XAI_OAUTH_API_BASE,
   buildXaiOAuthHeaders,
@@ -18,7 +20,9 @@ test("uses the official OAuth inference proxy and client headers", () => {
   }), {
     Authorization: "Bearer secret",
     "X-XAI-Token-Auth": "xai-grok-cli",
+    "x-authenticateresponse": XAI_AUTHENTICATE_RESPONSE,
     "x-grok-client-identifier": XAI_GROK_CLIENT_IDENTIFIER,
+    "x-grok-client-mode": XAI_GROK_CLIENT_MODE,
     "x-grok-client-version": XAI_GROK_CLIENT_VERSION,
     "User-Agent": `${XAI_GROK_CLIENT_IDENTIFIER}/${XAI_GROK_CLIENT_VERSION}`,
     "x-userid": "user-1",
