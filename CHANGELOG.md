@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+### Minor Changes
+
+- d60158c: Add an opt-in `grokCopilot.webSearch` setting for native xAI Web Search in Copilot Chat.
+
 ## 0.4.0
 
 ### Minor Changes
