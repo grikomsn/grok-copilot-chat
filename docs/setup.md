@@ -27,12 +27,13 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 | **Grok: Sign In to xAI with Device Code** | Authorize without a loopback browser callback |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |
 | **Grok: Show API Activity and Spend** | Show locally tracked billed spend, request tokens, and API rate capacity |
+| **Grok: Open Subscription Usage** | Open Grok weekly usage, reset date, Extra Usage Credits, and auto top-up |
 | **Grok: Open xAI Console Usage** | Open account-wide xAI API usage and prepaid credits |
 | **Grok: Show Diagnostics** | Show the VS Code version, session state, and registered models |
 
-After the first API call, the status bar shows the exact billed spend accumulated by this extension on this device. Hover it for a summary or click it for a native popup with the tracked total, latest request, token counts, refresh, and account actions. Last-known totals persist across VS Code reloads and are cleared on sign-out.
+After sign-in, the extension refreshes the read-only Grok subscription snapshot when the account exposes it. The status bar and popup can show the current weekly usage percentage, the scheduled reset date, Extra Usage Credits, and auto top-up status. After an API call, the same popup also shows exact billed spend accumulated by this extension on this device. Last-known totals and account snapshots persist across VS Code reloads and are cleared on sign-out.
 
-The request and token values returned in xAI response headers are transient throughput capacity (requests per second and tokens per minute). They can return to their full value quickly and are not cumulative usage or prepaid balance. Account-wide usage and prepaid credits are available in the xAI Console. Reading them programmatically requires a separate Management API key; the extension's normal xAI OAuth session does not have that permission.
+The request and token values returned in xAI response headers are transient throughput capacity (requests per second and tokens per minute). They can return to their full value quickly and are not subscription usage or prepaid balance. Subscription usage is read-only; use **Grok: Open Subscription Usage** to change billing or purchase credits. Account-wide API usage and prepaid API credits remain available in the xAI Console.
 
 ## Settings
 

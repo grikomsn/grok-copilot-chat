@@ -17,11 +17,18 @@ import {
   type DiscoveredModel,
 } from "./model-limits";
 import { XaiOAuth, type OAuthSession } from "./oauth";
-import { XAI_OAUTH_API_BASE, buildXaiOAuthHeaders } from "./provider-transport";
+import {
+  XAI_AUTO_TOPUP_PATH,
+  XAI_OAUTH_API_BASE,
+  XAI_SUBSCRIPTION_BILLING_PATH,
+  buildXaiOAuthHeaders,
+} from "./provider-transport";
 import { ChatCompletionStreamParser, validateStreamCompletion, type ChatStreamEvent } from "./sse";
 import {
   mergeUsageSnapshot,
+  parseAutoTopUpPayload,
   parseApiRateLimitHeaders,
+  parseSubscriptionUsagePayload,
   recordApiRequestUsage,
   toProviderUsagePayload,
   type GrokUsageSnapshot,
@@ -285,7 +292,71 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       this.mergeAndEmitUsage({ apiError: message, updatedAt: Date.now() });
       this.output.appendLine(`[activity] xAI API capacity refresh unavailable: ${message}`);
     }
+    await this.refreshSubscriptionUsage();
+    this.mergeAndEmitUsage({ updatedAt: Date.now() });
     return this.usage;
+  }
+
+  private async refreshSubscriptionUsage(): Promise<void> {
+    try {
+      const session = await this.oauth.getSession();
+      const billing = await this.fetchAccountPayload(session, XAI_SUBSCRIPTION_BILLING_PATH);
+      const subscription = parseSubscriptionUsagePayload(billing);
+      if (!subscription) throw new Error("xAI returned no subscription usage details");
+
+      let autoTopUp;
+      try {
+        const payload = await this.fetchAccountPayload(session, XAI_AUTO_TOPUP_PATH);
+        autoTopUp = parseAutoTopUpPayload(payload);
+      } catch (error) {
+        this.output.appendLine(`[activity] auto top-up refresh unavailable: ${messageOf(error)}`);
+      }
+      this.setSubscriptionState(subscription, autoTopUp);
+    } catch (error) {
+      const message = messageOf(error);
+      this.setSubscriptionState(undefined, undefined, message);
+      this.output.appendLine(`[activity] Grok subscription usage refresh unavailable: ${message}`);
+    }
+  }
+
+  private async fetchAccountPayload(session: OAuthSession, path: string): Promise<unknown> {
+    let response = await fetch(`${XAI_OAUTH_API_BASE}${path}`, {
+      headers: buildXaiOAuthHeaders({
+        accessToken: session.accessToken,
+        userId: session.userId,
+        email: session.email,
+        accept: "application/json",
+      }),
+    });
+    if (response.status === 401) {
+      const refreshed = await this.oauth.getSession(true);
+      response = await fetch(`${XAI_OAUTH_API_BASE}${path}`, {
+        headers: buildXaiOAuthHeaders({
+          accessToken: refreshed.accessToken,
+          userId: refreshed.userId,
+          email: refreshed.email,
+          accept: "application/json",
+        }),
+      });
+    }
+    if (!response.ok) throw await apiError(`Unable to read xAI account usage at ${path}`, response);
+    return response.json();
+  }
+
+  private setSubscriptionState(
+    subscription: GrokUsageSnapshot["subscription"],
+    autoTopUp: GrokUsageSnapshot["autoTopUp"],
+    error?: string,
+  ): void {
+    const next = { ...this.usage };
+    delete next.subscription;
+    delete next.autoTopUp;
+    delete next.subscriptionError;
+    if (subscription) next.subscription = subscription;
+    if (autoTopUp) next.autoTopUp = autoTopUp;
+    if (error) next.subscriptionError = error;
+    next.updatedAt = Date.now();
+    this.setAndEmitUsage(next);
   }
 
   private async sendRequest(

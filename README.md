@@ -25,6 +25,7 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 - Native VS Code context-window accounting from xAI token usage
 - Exact per-request and locally accumulated billed spend from xAI
 - Clearly labeled request-rate and tokens-per-minute capacity
+- Read-only SuperGrok weekly usage, reset date, Extra Usage Credits, and auto top-up status
 
 ## Quick start
 
@@ -32,9 +33,9 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 2. Run **Grok: Sign In to xAI** from the Command Palette and complete authorization in your browser. Use **Grok: Sign In to xAI with Device Code** if the browser callback is unavailable.
 3. Open Copilot Chat, select **Manage Models**, enable **xAI Grok**, then choose a Grok model.
 
-Use **Grok: Show API Activity and Spend** or click the Grok status-bar item to open a compact popup. It shows exact xAI-billed spend and token counts accumulated by this extension on the current device, the latest request, and transient API rate capacity. Hover the indicator for a quick summary. Tracked totals persist across VS Code reloads, and the popup links to the xAI Console for account-wide usage and prepaid credits.
+Use **Grok: Show API Activity and Spend** or click the Grok status-bar item to open a compact popup. It shows exact xAI-billed spend and token counts accumulated by this extension on the current device, the latest request, transient API rate capacity, and—when the OAuth account exposes it—the current SuperGrok weekly usage percentage, reset date, Extra Usage Credits, and auto top-up status. Hover the indicator for a quick summary. Tracked totals and the last read-only account snapshot persist across VS Code reloads.
 
-The request and token capacity values are short-window throughput limits (RPS/TPM), not a declining credit balance. Account-wide prepaid balance requires a separate xAI Management API key and remains available in the xAI Console; the normal OAuth session cannot read it.
+The request and token capacity values are short-window throughput limits (RPS/TPM), not subscription usage or a declining credit balance. The subscription snapshot is read-only and uses the same OAuth-backed Grok client service as model discovery and chat; xAI may change this private account surface. Use **Grok: Open Subscription Usage** to manage weekly usage, purchase Extra Usage Credits, or configure auto top-up in Grok. Use **Grok: Open xAI Console Usage** for team/API usage and prepaid API credits.
 
 Use **Grok: Manage xAI Connection** to inspect usage, test the connection, refresh models, inspect logs, or sign out.
 

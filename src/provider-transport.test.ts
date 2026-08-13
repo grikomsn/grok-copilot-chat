@@ -5,12 +5,16 @@ import {
   XAI_GROK_CLIENT_IDENTIFIER,
   XAI_GROK_CLIENT_MODE,
   XAI_GROK_CLIENT_VERSION,
+  XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
+  XAI_SUBSCRIPTION_BILLING_PATH,
   buildXaiOAuthHeaders,
 } from "./provider-transport";
 
 test("uses the official OAuth inference proxy and client headers", () => {
   assert.equal(XAI_OAUTH_API_BASE, "https://cli-chat-proxy.grok.com/v1");
+  assert.equal(XAI_SUBSCRIPTION_BILLING_PATH, "/billing?format=credits");
+  assert.equal(XAI_AUTO_TOPUP_PATH, "/auto-topup-rule");
   assert.deepEqual(buildXaiOAuthHeaders({
     accessToken: "secret",
     userId: "user-1",

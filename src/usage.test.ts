@@ -3,8 +3,11 @@ import test from "node:test";
 import {
   formatUsageRows,
   formatUsageStatusBar,
+  formatUsageTooltip,
   mergeUsageSnapshot,
+  parseAutoTopUpPayload,
   parseApiRateLimitHeaders,
+  parseSubscriptionUsagePayload,
   recordApiRequestUsage,
   toProviderUsagePayload,
 } from "./usage";
@@ -34,6 +37,108 @@ test("supports generic rate-limit headers", () => {
   assert.deepEqual(parseApiRateLimitHeaders({ get: (name) => values.get(name) ?? null }, 1000), {
     requests: { limit: 60, remaining: 45, resetsAt: 31_000 },
   });
+});
+
+test("parses unified weekly subscription usage and prepaid credits", () => {
+  assert.deepEqual(parseSubscriptionUsagePayload({
+    config: {
+      creditUsagePercent: 42.5,
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-13T00:00:00Z",
+        end: "2026-08-20T00:00:00Z",
+      },
+      prepaidBalance: { val: 1250 },
+      onDemandCap: { val: 5000 },
+      onDemandUsed: { val: 300 },
+      isUnifiedBillingUser: true,
+    },
+    onDemandEnabled: true,
+    subscriptionTier: "SuperGrok",
+  }), {
+    usagePercent: 42.5,
+    periodType: "USAGE_PERIOD_TYPE_WEEKLY",
+    periodStart: "2026-08-13T00:00:00Z",
+    periodEnd: "2026-08-20T00:00:00Z",
+    prepaidBalanceCents: 1250,
+    onDemandCapCents: 5000,
+    onDemandUsedCents: 300,
+    onDemandEnabled: true,
+    isUnifiedBillingUser: true,
+    subscriptionTier: "SuperGrok",
+  });
+});
+
+test("defaults omitted zero usage at the start of a subscription period", () => {
+  assert.deepEqual(parseSubscriptionUsagePayload({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-20T00:00:00Z",
+        end: "2026-08-27T00:00:00Z",
+      },
+    },
+  }), {
+    usagePercent: 0,
+    periodType: "USAGE_PERIOD_TYPE_WEEKLY",
+    periodStart: "2026-08-20T00:00:00Z",
+    periodEnd: "2026-08-27T00:00:00Z",
+  });
+  assert.equal(parseSubscriptionUsagePayload({
+    config: {
+      currentPeriod: {},
+      creditUsagePercent: "not-a-percent",
+    },
+  }), undefined);
+});
+
+test("falls back to legacy billing fields and rejects malformed subscription data", () => {
+  assert.deepEqual(parseSubscriptionUsagePayload({
+    config: {
+      monthlyLimit: { val: 2000 },
+      used: { val: 500 },
+      billingPeriodEnd: "2026-09-01T00:00:00Z",
+    },
+  }), {
+    usagePercent: 25,
+    periodEnd: "2026-09-01T00:00:00Z",
+  });
+  assert.equal(parseSubscriptionUsagePayload({ config: {} }), undefined);
+  assert.equal(parseSubscriptionUsagePayload("not an object"), undefined);
+});
+
+test("parses auto top-up status and renders subscription usage rows", () => {
+  assert.deepEqual(parseAutoTopUpPayload({
+    rule: {
+      enabled: true,
+      minBeforeHittingSl: { val: 250 },
+      topupAmount: { val: 1000 },
+      maxAmountPerMonth: { val: 5000 },
+    },
+  }), {
+    enabled: true,
+    minBeforeHittingSlCents: 250,
+    topupAmountCents: 1000,
+    maxAmountPerMonthCents: 5000,
+  });
+  assert.equal(parseAutoTopUpPayload({}), undefined);
+
+  const snapshot = mergeUsageSnapshot({}, {
+    subscription: {
+      usagePercent: 42.5,
+      periodType: "USAGE_PERIOD_TYPE_WEEKLY",
+      periodEnd: "2026-08-20T00:00:00Z",
+      prepaidBalanceCents: 1250,
+      subscriptionTier: "SuperGrok",
+    },
+    autoTopUp: { enabled: true, topupAmountCents: 1000 },
+  });
+  const rows = formatUsageRows(snapshot, Date.parse("2026-08-13T00:00:00Z"));
+  assert.deepEqual(rows.map((row) => row.kind), ["subscription", "credits", "autotopup"]);
+  assert.equal(formatUsageStatusBar(snapshot), "$(pulse) Grok 42.5% weekly");
+  assert.match(formatUsageTooltip(snapshot), /Weekly Grok usage: 42\.5% used/);
+  assert.match(rows[1].description, /\$12\.50/);
+  assert.match(rows[2].detail ?? "", /buys \$10\.00/);
 });
 
 test("merges request and token capacity and formats the status", () => {
