@@ -69,6 +69,29 @@ test("parses unified weekly subscription usage and prepaid credits", () => {
   });
 });
 
+test("defaults omitted zero usage at the start of a subscription period", () => {
+  assert.deepEqual(parseSubscriptionUsagePayload({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-20T00:00:00Z",
+        end: "2026-08-27T00:00:00Z",
+      },
+    },
+  }), {
+    usagePercent: 0,
+    periodType: "USAGE_PERIOD_TYPE_WEEKLY",
+    periodStart: "2026-08-20T00:00:00Z",
+    periodEnd: "2026-08-27T00:00:00Z",
+  });
+  assert.equal(parseSubscriptionUsagePayload({
+    config: {
+      currentPeriod: {},
+      creditUsagePercent: "not-a-percent",
+    },
+  }), undefined);
+});
+
 test("falls back to legacy billing fields and rejects malformed subscription data", () => {
   assert.deepEqual(parseSubscriptionUsagePayload({
     config: {

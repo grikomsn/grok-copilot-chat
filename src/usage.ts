@@ -94,12 +94,17 @@ export function parseSubscriptionUsagePayload(raw: unknown): GrokSubscriptionUsa
   const config = isRecord(rawConfig) ? rawConfig : root;
   const periodValue = valueOf(config, "currentPeriod", "current_period");
   const period = isRecord(periodValue) ? periodValue : {};
+  const rawUsagePercent = valueOf(config, "creditUsagePercent", "credit_usage_percent");
+  const usagePercentIsPresent = hasOwn(config, "creditUsagePercent", "credit_usage_percent");
   const monthlyLimit = readCents(valueOf(config, "monthlyLimit", "monthly_limit"));
   const used = readCents(valueOf(config, "used"));
-  const usagePercent = readPercent(valueOf(config, "creditUsagePercent", "credit_usage_percent"))
-    ?? (monthlyLimit && monthlyLimit > 0 && used !== undefined
-      ? Math.min(100, Math.max(0, (used / monthlyLimit) * 100))
-      : undefined);
+  const usagePercent = usagePercentIsPresent
+    ? readPercent(rawUsagePercent)
+    : isRecord(periodValue)
+      ? 0
+      : (monthlyLimit && monthlyLimit > 0 && used !== undefined
+        ? Math.min(100, Math.max(0, (used / monthlyLimit) * 100))
+        : undefined);
   const result = compactObject({
     usagePercent,
     periodType: readText(valueOf(period, "type", "periodType", "period_type")),
@@ -501,6 +506,10 @@ function valueOf(record: Record<string, unknown>, ...keys: string[]): unknown {
     if (record[key] !== undefined && record[key] !== null) return record[key];
   }
   return undefined;
+}
+
+function hasOwn(record: Record<string, unknown>, ...keys: string[]): boolean {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(record, key));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
