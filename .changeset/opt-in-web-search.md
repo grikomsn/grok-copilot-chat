@@ -2,4 +2,4 @@
 "grok-copilot-chat": minor
 ---
 
-Add an opt-in native xAI Web Search toggle beside the model-specific reasoning controls in Copilot Chat.
+Add an opt-in `grokCopilot.webSearch` setting for native xAI Web Search in Copilot Chat.

@@ -187,7 +187,10 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       options.modelConfiguration,
       this.configuration.get("reasoningEffort", "high"),
     );
-    const webSearch = resolveWebSearch(options.modelConfiguration);
+    const webSearch = resolveWebSearch(
+      options.modelConfiguration,
+      this.configuration.get("webSearch", false),
+    );
     const maxOutputTokens = resolveModelTokenLimits(
       model.contextLength,
       this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS),

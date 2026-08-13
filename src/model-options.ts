@@ -46,8 +46,13 @@ export function resolveReasoningEffort(
     : spec.defaultEffort;
 }
 
-export function resolveWebSearch(requestConfiguration: Readonly<Record<string, unknown>> | undefined): boolean {
-  return requestConfiguration?.webSearch === true;
+export function resolveWebSearch(
+  requestConfiguration: Readonly<Record<string, unknown>> | undefined,
+  workspaceDefault?: unknown,
+): boolean {
+  return requestConfiguration?.webSearch === true
+    || requestConfiguration?.webSearch === "on"
+    || workspaceDefault === true;
 }
 
 export function buildModelConfigurationSchema(
@@ -72,13 +77,6 @@ export function buildModelConfigurationSchema(
         enumItemLabels: spec.efforts.map(formatEffortLabel),
         enumDescriptions: spec.efforts.map((effort) => effortDescription(effort, idIsMultiAgent(modelId))),
         default: selectedDefault,
-        group: "navigation",
-      },
-      webSearch: {
-        type: "boolean",
-        title: "Web Search",
-        description: "Allow Grok to use xAI's native web search for this request",
-        default: false,
         group: "navigation",
       },
     },

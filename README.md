@@ -20,7 +20,7 @@ This extension is a native VS Code `LanguageModelChatProvider`. It authenticates
 - Browser/PKCE and device-code xAI sign-in with token refresh
 - Live Grok model discovery
 - Model-specific reasoning-effort switcher in Copilot Chat
-- Opt-in native xAI web search from the model picker
+- Opt-in native xAI web search through a workspace setting
 - Streaming text and reasoning
 - Agent mode tool calls and image inputs
 - Native VS Code context-window accounting from xAI token usage

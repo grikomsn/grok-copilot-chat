@@ -37,7 +37,10 @@ test("does not add a reasoning switcher to non-reasoning and unknown models", ()
 test("request selection overrides the workspace default", () => {
   assert.equal(resolveReasoningEffort("grok-4.5", { reasoningEffort: "low" }, "medium"), "low");
   assert.equal(resolveWebSearch({ webSearch: true }), true);
+  assert.equal(resolveWebSearch({ webSearch: "on" }), true);
   assert.equal(resolveWebSearch({ webSearch: false }), false);
+  assert.equal(resolveWebSearch(undefined, true), true);
+  assert.equal(resolveWebSearch(undefined, false), false);
   assert.equal(resolveWebSearch(undefined), false);
   assert.deepEqual(applyReasoningEffort({ model: "grok-4.5" }, "low"), {
     model: "grok-4.5",
@@ -64,9 +67,6 @@ test("configuration schema exposes a native picker with the workspace default", 
   const schema = buildModelConfigurationSchema("grok-4.3", "medium");
   assert.deepEqual(schema?.properties.reasoningEffort.enum, ["none", "low", "medium", "high"]);
   assert.equal(schema?.properties.reasoningEffort.default, "medium");
-  assert.equal(schema?.properties.webSearch.type, "boolean");
-  assert.equal(schema?.properties.webSearch.title, "Web Search");
-  assert.equal(schema?.properties.webSearch.default, false);
 
   const multiAgent = buildModelConfigurationSchema("grok-4.20-multi-agent", "xhigh");
   assert.equal(multiAgent?.properties.reasoningEffort.title, "Agent Effort");
