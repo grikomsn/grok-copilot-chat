@@ -16,7 +16,7 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 4. In Copilot Chat, open the model picker, select **Manage Models**, and enable **xAI Grok**.
 5. Select an available Grok model.
 
-Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker. The available choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a picker because their legacy contracts do not accept the current reasoning parameter.
+Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker. Enable `grokCopilot.webSearch` in VS Code Settings when Grok should use xAI's native web search; it is off by default and routes requests through xAI's Responses API. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a picker because their legacy contracts do not accept the current reasoning parameter.
 
 ## Commands
 
@@ -40,6 +40,7 @@ The request and token values returned in xAI response headers are transient thro
 | Setting | Default | Purpose |
 | --- | ---: | --- |
 | `grokCopilot.reasoningEffort` | `high` | Default effort for reasoning-capable models; the model-picker selection overrides it |
+| `grokCopilot.webSearch` | `false` | Allow xAI's native web search and route requests through the Responses API |
 | `grokCopilot.maxOutputTokens` | `16384` | Maximum output tokens requested from Grok |
 | `grokCopilot.requestTimeoutSeconds` | `600` | Request timeout in seconds |
 | `grokCopilot.debugLogging` | `false` | Log request, usage, stream, and rate-limit metadata to the Grok output channel |

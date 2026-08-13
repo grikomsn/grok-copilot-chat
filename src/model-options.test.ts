@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyReasoningEffort,
+  applyResponsesReasoningEffort,
   buildModelConfigurationSchema,
   modelEffortSpec,
   resolveReasoningEffort,
+  resolveWebSearch,
 } from "./model-options";
 
 test("exposes model-specific Grok reasoning levels", () => {
@@ -34,9 +36,22 @@ test("does not add a reasoning switcher to non-reasoning and unknown models", ()
 
 test("request selection overrides the workspace default", () => {
   assert.equal(resolveReasoningEffort("grok-4.5", { reasoningEffort: "low" }, "medium"), "low");
+  assert.equal(resolveWebSearch({ webSearch: true }), true);
+  assert.equal(resolveWebSearch({ webSearch: "on" }), true);
+  assert.equal(resolveWebSearch({ webSearch: false }), false);
+  assert.equal(resolveWebSearch(undefined, true), true);
+  assert.equal(resolveWebSearch(undefined, false), false);
+  assert.equal(resolveWebSearch(undefined), false);
   assert.deepEqual(applyReasoningEffort({ model: "grok-4.5" }, "low"), {
     model: "grok-4.5",
     reasoning_effort: "low",
+  });
+  assert.deepEqual(applyResponsesReasoningEffort({ model: "grok-4.5" }, "high"), {
+    model: "grok-4.5",
+    reasoning: { effort: "high" },
+  });
+  assert.deepEqual(applyResponsesReasoningEffort({ model: "grok-4.5" }, "none"), {
+    model: "grok-4.5",
   });
   assert.deepEqual(applyReasoningEffort({ model: "grok-imagine-image" }, undefined), {
     model: "grok-imagine-image",

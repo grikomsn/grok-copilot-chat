@@ -46,6 +46,15 @@ export function resolveReasoningEffort(
     : spec.defaultEffort;
 }
 
+export function resolveWebSearch(
+  requestConfiguration: Readonly<Record<string, unknown>> | undefined,
+  workspaceDefault?: unknown,
+): boolean {
+  return requestConfiguration?.webSearch === true
+    || requestConfiguration?.webSearch === "on"
+    || workspaceDefault === true;
+}
+
 export function buildModelConfigurationSchema(
   modelId: string,
   defaultEffort?: ReasoningEffort,
@@ -72,6 +81,15 @@ export function buildModelConfigurationSchema(
       },
     },
   };
+}
+
+export function applyResponsesReasoningEffort(
+  body: Readonly<Record<string, unknown>>,
+  effort: ReasoningEffort | undefined,
+): Record<string, unknown> {
+  return effort && effort !== "none"
+    ? { ...body, reasoning: { effort } }
+    : { ...body };
 }
 
 export function applyReasoningEffort(

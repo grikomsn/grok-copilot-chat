@@ -93,6 +93,11 @@
           ],
           "description": "Default Grok reasoning effort. A model-picker selection overrides this value, and each model only shows supported levels."
         },
+        "grokCopilot.webSearch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow Grok to use xAI's native web search. This routes requests through the Responses API and is off by default."
+        },
         "grokCopilot.maxOutputTokens": {
           "type": "number",
           "default": 16384,
