@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- bf34617: Show read-only Grok subscription usage, weekly reset timing, Extra Usage Credits, and auto top-up status for OAuth accounts.
+
 ## 0.3.3
 
 ### Patch Changes
