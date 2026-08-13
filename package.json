@@ -3,6 +3,7 @@
   "displayName": "Grok for GitHub Copilot Chat",
   "description": "Use xAI Grok models in GitHub Copilot Chat with xAI OAuth.",
   "version": "0.3.3",
+  "packageManager": "npm@12.0.2",
   "publisher": "grikomsn",
   "icon": "assets/icon.png",
   "license": "MIT",
