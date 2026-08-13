@@ -8,6 +8,10 @@ import {
 } from "./model-options";
 
 test("exposes model-specific Grok reasoning levels", () => {
+  assert.deepEqual(modelEffortSpec("grok-4.6"), {
+    efforts: ["low", "medium", "high", "xhigh"],
+    defaultEffort: "high",
+  });
   assert.deepEqual(modelEffortSpec("grok-4.5"), {
     efforts: ["low", "medium", "high"],
     defaultEffort: "high",
@@ -24,6 +28,7 @@ test("exposes model-specific Grok reasoning levels", () => {
 
 test("does not add a reasoning switcher to non-reasoning and unknown models", () => {
   assert.equal(modelEffortSpec("grok-4-1-fast-non-reasoning"), undefined);
+  assert.equal(modelEffortSpec("grok-4-1-fast-reasoning"), undefined);
   assert.equal(buildModelConfigurationSchema("grok-imagine-image"), undefined);
 });
 
@@ -51,4 +56,7 @@ test("configuration schema exposes a native picker with the workspace default", 
   const multiAgent = buildModelConfigurationSchema("grok-4.20-multi-agent", "xhigh");
   assert.equal(multiAgent?.properties.reasoningEffort.title, "Agent Effort");
   assert.equal(multiAgent?.properties.reasoningEffort.default, "xhigh");
+
+  const frontier = buildModelConfigurationSchema("grok-4.6", "xhigh");
+  assert.deepEqual(frontier?.properties.reasoningEffort.enum, ["low", "medium", "high", "xhigh"]);
 });

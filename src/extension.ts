@@ -20,7 +20,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const provider = new GrokProvider(
     oauth,
     output,
-    `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
     context.globalState.get<GrokUsageSnapshot>(USAGE_STATE_KEY) ?? {},
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);

@@ -18,6 +18,8 @@ export interface OAuthSession {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
+  userId?: string;
+  email?: string;
 }
 
 export interface DeviceCode {
@@ -33,6 +35,9 @@ interface TokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in?: number;
+  id_token?: string;
+  user_id?: string;
+  email?: string;
 }
 
 interface TokenError {
@@ -295,18 +300,22 @@ export class XaiOAuth {
     throw new Error("The xAI sign-in code expired; start sign-in again");
   }
 
-  async getAccessToken(forceRefresh = false): Promise<string> {
+  async getSession(forceRefresh = false): Promise<OAuthSession> {
     const session = await this.readSession();
     if (!session) throw new Error("Sign in to xAI before using a Grok model");
     if (!forceRefresh && session.expiresAt - this.now() > REFRESH_SKEW_MS) {
-      return session.accessToken;
+      return session;
     }
     if (!this.refreshPromise) {
       this.refreshPromise = this.refresh(session).finally(() => {
         this.refreshPromise = undefined;
       });
     }
-    return (await this.refreshPromise).accessToken;
+    return this.refreshPromise;
+  }
+
+  async getAccessToken(forceRefresh = false): Promise<string> {
+    return (await this.getSession(forceRefresh)).accessToken;
   }
 
   async signOut(): Promise<void> {
@@ -326,7 +335,12 @@ export class XaiOAuth {
     if (!response.ok) {
       throw await responseError("xAI token refresh failed; sign in again", response);
     }
-    const refreshed = toSession((await response.json()) as TokenResponse, session.refreshToken, this.now());
+    const refreshed = toSession(
+      (await response.json()) as TokenResponse,
+      session.refreshToken,
+      this.now(),
+      session,
+    );
     await this.writeSession(refreshed);
     return refreshed;
   }
@@ -414,15 +428,49 @@ function sendCallbackText(
   response.end(detail);
 }
 
-function toSession(tokens: TokenResponse, fallbackRefreshToken: string | undefined, now: number): OAuthSession {
+function toSession(
+  tokens: TokenResponse,
+  fallbackRefreshToken: string | undefined,
+  now: number,
+  fallbackIdentity: Pick<OAuthSession, "userId" | "email"> = {},
+): OAuthSession {
   if (!tokens.access_token || !(tokens.refresh_token || fallbackRefreshToken)) {
     throw new Error("xAI returned an incomplete OAuth token response");
   }
+  const claims = parseIdToken(tokens.id_token);
+  const userId = firstString(
+    claims?.sub,
+    claims?.user_id,
+    claims?.userId,
+    tokens.user_id,
+    fallbackIdentity.userId,
+  );
+  const email = firstString(claims?.email, tokens.email, fallbackIdentity.email);
   return {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token ?? fallbackRefreshToken!,
     expiresAt: now + positiveSeconds(tokens.expires_in, 3600) * 1000,
+    ...(userId ? { userId } : {}),
+    ...(email ? { email } : {}),
   };
+}
+
+function parseIdToken(token: string | undefined): Record<string, unknown> | undefined {
+  if (!token) return undefined;
+  const payload = token.split(".")[1];
+  if (!payload) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.length > 0);
 }
 
 async function responseError(prefix: string, response: Response): Promise<Error> {

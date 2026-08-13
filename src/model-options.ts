@@ -10,6 +10,11 @@ const STANDARD_REASONING: ModelEffortSpec = {
   defaultEffort: "high",
 };
 
+const FRONTIER_REASONING: ModelEffortSpec = {
+  efforts: ["low", "medium", "high", "xhigh"],
+  defaultEffort: "high",
+};
+
 const OPTIONAL_REASONING: ModelEffortSpec = {
   efforts: ["none", "low", "medium", "high"],
   defaultEffort: "low",
@@ -21,11 +26,9 @@ export function modelEffortSpec(modelId: string): ModelEffortSpec | undefined {
   if (id.includes("grok-4.20-multi-agent")) {
     return { efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "high" };
   }
+  if (id.includes("grok-4.6")) return FRONTIER_REASONING;
   if (id.includes("grok-4.5")) return STANDARD_REASONING;
   if (id.includes("grok-4.3")) return OPTIONAL_REASONING;
-  if (id.includes("grok-3-mini") || id.includes("fast-reasoning")) {
-    return { efforts: ["low", "high"], defaultEffort: "high" };
-  }
   return undefined;
 }
 

@@ -9,12 +9,18 @@ export interface ChatStreamEvent {
   reasoning?: string;
   toolCalls?: PendingToolCall[];
   usage?: Record<string, unknown>;
+  finishReason?: string;
   done?: boolean;
 }
 
 export class ChatCompletionStreamParser {
   private buffer = "";
   private readonly pendingTools = new Map<number, PendingToolCall>();
+  private lastFinishReason: string | undefined;
+
+  get finishReason(): string | undefined {
+    return this.lastFinishReason;
+  }
 
   push(chunk: string): ChatStreamEvent[] {
     this.buffer += chunk.replace(/\r\n/g, "\n");
@@ -64,6 +70,7 @@ export class ChatCompletionStreamParser {
     this.collectTools(delta.tool_calls);
 
     const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined;
+    if (finishReason) this.lastFinishReason = finishReason;
     const shouldFlush = finishReason === "tool_calls" || finishReason === "stop";
     const toolCalls = shouldFlush ? this.flushTools() : [];
     const text = typeof delta.content === "string" ? delta.content : undefined;
@@ -77,6 +84,7 @@ export class ChatCompletionStreamParser {
       ...(reasoning ? { reasoning } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
       ...(usage ? { usage } : {}),
+      ...(finishReason ? { finishReason } : {}),
     };
   }
 
@@ -99,6 +107,20 @@ export class ChatCompletionStreamParser {
     this.pendingTools.clear();
     return tools;
   }
+}
+
+export function validateStreamCompletion(finishReason: string | undefined): void {
+  if (finishReason === "stop" || finishReason === "tool_calls" || finishReason === "function_call") return;
+  if (!finishReason) {
+    throw new Error("xAI response stream ended before a completion reason was received");
+  }
+  if (finishReason === "length") {
+    throw new Error("xAI response reached the configured output token limit before completing");
+  }
+  if (finishReason === "content_filter") {
+    throw new Error("xAI stopped the response because of its content filter");
+  }
+  throw new Error(`xAI response ended with finish reason: ${finishReason}`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

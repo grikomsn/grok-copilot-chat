@@ -8,12 +8,13 @@ import {
 
 test("keeps fallback models aligned with the current xAI catalog", () => {
   assert.deepEqual(FALLBACK_MODELS, [
-    { id: "grok-4.5", contextLength: 500_000 },
-    { id: "grok-4.3", contextLength: 1_000_000 },
-    { id: "grok-build-0.1", contextLength: 256_000 },
-    { id: "grok-4.20", contextLength: 1_000_000 },
-    { id: "grok-4.20-non-reasoning", contextLength: 1_000_000 },
-    { id: "grok-4.20-multi-agent", contextLength: 1_000_000 },
+    { id: "grok-4.6", contextLength: 500_000, imageInput: true, toolCalling: true },
+    { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
+    { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
+    { id: "grok-build-0.1", contextLength: 256_000, toolCalling: true },
+    { id: "grok-4.20", contextLength: 1_000_000, toolCalling: true },
+    { id: "grok-4.20-non-reasoning", contextLength: 1_000_000, toolCalling: true },
+    { id: "grok-4.20-multi-agent", contextLength: 1_000_000, toolCalling: true },
   ]);
 });
 
@@ -25,6 +26,7 @@ test("parses chat models and context_length from xAI /v1/models payloads", () =>
         id: "grok-4.5",
         context_length: 500_000,
         long_context_threshold: 200_000,
+        capabilities: { image_input: true, tool_calling: true },
       },
       {
         id: "grok-code-fast-1",
@@ -42,7 +44,7 @@ test("parses chat models and context_length from xAI /v1/models payloads", () =>
   });
 
   assert.deepEqual(models, [
-    { id: "grok-4.5", contextLength: 500_000 },
+    { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
     { id: "grok-code-fast-1", contextLength: 256_000 },
   ]);
 });
@@ -63,10 +65,10 @@ test("ignores invalid context_length and non-chat entries", () => {
   });
 
   assert.deepEqual(models, [
-    { id: "grok-4.3", contextLength: 1_000_000 },
-    { id: "grok-4.5", contextLength: 500_000 },
+    { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
+    { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
     { id: "grok-4.5-latest" },
-    { id: "grok-build-0.1", contextLength: 256_000 },
+    { id: "grok-build-0.1", contextLength: 256_000, toolCalling: true },
   ]);
 });
 
@@ -82,10 +84,10 @@ test("uses per-model fallback context lengths for partial discovery metadata", (
   });
 
   assert.deepEqual(models, [
-    { id: "grok-4.20-multi-agent", contextLength: 1_000_000 },
-    { id: "grok-4.3", contextLength: 1_000_000 },
-    { id: "grok-4.5", contextLength: 500_000 },
-    { id: "grok-build-0.1", contextLength: 256_000 },
+    { id: "grok-4.20-multi-agent", contextLength: 1_000_000, toolCalling: true },
+    { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
+    { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
+    { id: "grok-build-0.1", contextLength: 256_000, toolCalling: true },
     { id: "grok-future" },
   ]);
 });
@@ -120,7 +122,7 @@ test("does not treat long_context_threshold as the context window", () => {
       },
     ],
   });
-  assert.deepEqual(models, [{ id: "grok-4.5", contextLength: 500_000 }]);
+  assert.deepEqual(models, [{ id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true }]);
   assert.equal(resolveModelTokenLimits(models[0]?.contextLength, 16_384).contextLength, 500_000);
 });
 
