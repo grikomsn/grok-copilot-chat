@@ -4,6 +4,7 @@ import {
   applyReasoningEffort,
   buildModelConfigurationSchema,
   resolveReasoningEffort,
+  resolveWebSearch,
   type ReasoningEffort,
 } from "./model-options";
 import {
@@ -24,6 +25,13 @@ import {
   buildXaiOAuthHeaders,
 } from "./provider-transport";
 import { ChatCompletionStreamParser, validateStreamCompletion, type ChatStreamEvent } from "./sse";
+import {
+  buildResponsesFunctionTool,
+  buildResponsesRequest,
+  ResponsesStreamParser,
+  type ResponsesInputContentPart,
+  type ResponsesInputItem,
+} from "./responses";
 import {
   mergeUsageSnapshot,
   parseAutoTopUpPayload,
@@ -179,34 +187,42 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       options.modelConfiguration,
       this.configuration.get("reasoningEffort", "high"),
     );
-    const requestBody = buildRequest(
-      model.rawModelId,
-      messages,
-      options,
-      reasoningEffort,
-      resolveModelTokenLimits(
-        model.contextLength,
-        this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS),
-      ).maxOutputTokens,
-    );
+    const webSearch = resolveWebSearch(options.modelConfiguration);
+    const maxOutputTokens = resolveModelTokenLimits(
+      model.contextLength,
+      this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS),
+    ).maxOutputTokens;
+    const requestBody = webSearch
+      ? buildResponsesRequest(
+        model.rawModelId,
+        normalizeResponsesInput(messages.flatMap(convertResponseMessage)),
+        [
+          { type: "web_search" },
+          ...(options.tools ?? []).map(buildResponsesFunctionTool),
+        ],
+        reasoningEffort,
+        maxOutputTokens,
+        toolMode(options.toolMode),
+      )
+      : buildRequest(model.rawModelId, messages, options, reasoningEffort, maxOutputTokens);
     let session = await this.oauth.getSession();
-    let pending = await this.sendRequest(session, requestBody, token);
+    let pending = await this.sendRequest(session, requestBody, token, webSearch ? "responses" : "chat/completions");
     if (pending.response.status === 401) {
       pending.cleanup();
       session = await this.oauth.getSession(true);
-      pending = await this.sendRequest(session, requestBody, token);
+      pending = await this.sendRequest(session, requestBody, token, webSearch ? "responses" : "chat/completions");
     }
     const response = pending.response;
-    this.captureApiLimits(response.headers, `chat:${model.rawModelId}`);
+    this.captureApiLimits(response.headers, `${webSearch ? "responses" : "chat"}:${model.rawModelId}`);
     try {
       if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
       if (!response.body) throw new Error("xAI returned an empty response stream");
 
       if (this.debugLogging) {
-        this.output.appendLine(`[request] model=${model.rawModelId} effort=${reasoningEffort ?? "model-default"} initiator=${options.requestInitiator ?? "unknown"}`);
+        this.output.appendLine(`[request] model=${model.rawModelId} effort=${reasoningEffort ?? "model-default"} webSearch=${webSearch} initiator=${options.requestInitiator ?? "unknown"}`);
       }
 
-      const parser = new ChatCompletionStreamParser();
+      const parser = webSearch ? new ResponsesStreamParser() : new ChatCompletionStreamParser();
       let finalUsage: Record<string, unknown> | undefined;
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -363,6 +379,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     session: OAuthSession,
     requestBody: Record<string, unknown>,
     cancellation: vscode.CancellationToken,
+    endpoint: "chat/completions" | "responses" = "chat/completions",
   ): Promise<PendingResponse> {
     const controller = new AbortController();
     const timeoutSeconds = Math.max(
@@ -379,7 +396,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       listener.dispose();
     };
     try {
-      const response = await fetch(`${XAI_OAUTH_API_BASE}/chat/completions`, {
+      const response = await fetch(`${XAI_OAUTH_API_BASE}/${endpoint}`, {
         method: "POST",
         headers: {
           ...buildXaiOAuthHeaders({
@@ -500,6 +517,53 @@ function convertMessage(message: vscode.LanguageModelChatRequestMessage): ApiMes
   }
   if (results.length) return content ? [{ role, content }, ...results] : results;
   return [{ role, content }];
+}
+
+function convertResponseMessage(message: vscode.LanguageModelChatRequestMessage): ResponsesInputItem[] {
+  const role = message.role === vscode.LanguageModelChatMessageRole.Assistant ? "assistant" : "user";
+  const text: string[] = [];
+  const images: ResponsesInputContentPart[] = [];
+  const toolCalls: ResponsesInputItem[] = [];
+  const results: ResponsesInputItem[] = [];
+
+  for (const part of message.content) {
+    if (part instanceof vscode.LanguageModelTextPart) text.push(part.value);
+    else if (part instanceof vscode.LanguageModelToolCallPart) {
+      toolCalls.push({
+        type: "function_call",
+        call_id: part.callId,
+        name: part.name,
+        arguments: JSON.stringify(part.input ?? {}),
+      });
+    } else if (part instanceof vscode.LanguageModelToolResultPart) {
+      results.push({
+        type: "function_call_output",
+        call_id: part.callId,
+        output: part.content.map(inputPartText).join("\n"),
+      });
+    } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith("image/")) {
+      images.push({
+        type: "input_image",
+        image_url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}`,
+      });
+    }
+  }
+
+  const textValue = text.join("\n");
+  const content: string | readonly ResponsesInputContentPart[] = images.length
+    ? [...(textValue ? [{ type: "input_text" as const, text: textValue }] : []), ...images]
+    : textValue;
+  const items: ResponsesInputItem[] = [];
+  if (content || (!toolCalls.length && !results.length)) {
+    items.push({ type: "message", role, content });
+  }
+  if (role === "assistant") items.push(...toolCalls);
+  else items.push(...results);
+  return items;
+}
+
+function normalizeResponsesInput(input: ResponsesInputItem[]): ResponsesInputItem[] {
+  return input.length ? input : [{ type: "message", role: "user", content: "" }];
 }
 
 function normalizeMessages(messages: ApiMessage[]): ApiMessage[] {

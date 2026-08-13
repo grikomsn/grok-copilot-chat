@@ -46,6 +46,10 @@ export function resolveReasoningEffort(
     : spec.defaultEffort;
 }
 
+export function resolveWebSearch(requestConfiguration: Readonly<Record<string, unknown>> | undefined): boolean {
+  return requestConfiguration?.webSearch === true;
+}
+
 export function buildModelConfigurationSchema(
   modelId: string,
   defaultEffort?: ReasoningEffort,
@@ -70,8 +74,24 @@ export function buildModelConfigurationSchema(
         default: selectedDefault,
         group: "navigation",
       },
+      webSearch: {
+        type: "boolean",
+        title: "Web Search",
+        description: "Allow Grok to use xAI's native web search for this request",
+        default: false,
+        group: "navigation",
+      },
     },
   };
+}
+
+export function applyResponsesReasoningEffort(
+  body: Readonly<Record<string, unknown>>,
+  effort: ReasoningEffort | undefined,
+): Record<string, unknown> {
+  return effort && effort !== "none"
+    ? { ...body, reasoning: { effort } }
+    : { ...body };
 }
 
 export function applyReasoningEffort(

@@ -16,7 +16,7 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 4. In Copilot Chat, open the model picker, select **Manage Models**, and enable **xAI Grok**.
 5. Select an available Grok model.
 
-Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker. The available choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a picker because their legacy contracts do not accept the current reasoning parameter.
+Reasoning-capable models expose native **Reasoning Effort** and **Web Search** controls in the Copilot Chat model picker. The Web Search toggle is off by default; enable it when Grok should use xAI's native web search for the request. Enabling it routes that request through xAI's Responses API and may add xAI tool-invocation usage. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a picker because their legacy contracts do not accept the current reasoning parameter.
 
 ## Commands
 
