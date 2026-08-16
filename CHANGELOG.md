@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+### Minor Changes
+
+- 529cbe1: Add configurable Grok model-catalog caching and a setting to control the usage status bar.
+
 ## 0.5.1
 
 ### Patch Changes
