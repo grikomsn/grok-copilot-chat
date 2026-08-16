@@ -22,6 +22,7 @@ export function activate(context: vscode.ExtensionContext): void {
   usageStatus.name = "Grok usage and API activity";
   usageStatus.command = "grokCopilot.showUsage";
   renderUsageStatus(usageStatus, provider.getUsageSnapshot());
+  updateUsageStatusVisibility(usageStatus);
 
   context.subscriptions.push(
     output,
@@ -38,6 +39,9 @@ export function activate(context: vscode.ExtensionContext): void {
       ) {
         provider.fireDidChange();
       }
+      if (event.affectsConfiguration("grokCopilot.showUsageStatusBar")) {
+        updateUsageStatusVisibility(usageStatus);
+      }
     }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     ...registerCommands(oauth, provider, output, usageStatus),
@@ -45,7 +49,12 @@ export function activate(context: vscode.ExtensionContext): void {
   output.appendLine(`[activate] Grok for Copilot Chat ${context.extension.packageJSON.version} on VS Code ${vscode.version}`);
   void oauth.hasSession().then((signedIn) => {
     if (!signedIn) return;
-    usageStatus.show();
+    updateUsageStatusVisibility(usageStatus);
     void provider.refreshUsage().catch((error) => output.appendLine(`[activity] initial refresh failed: ${messageOf(error)}`));
   });
+}
+
+function updateUsageStatusVisibility(item: vscode.StatusBarItem): void {
+  if (vscode.workspace.getConfiguration("grokCopilot").get("showUsageStatusBar", true)) item.show();
+  else item.hide();
 }
