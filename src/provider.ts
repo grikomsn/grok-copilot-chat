@@ -38,6 +38,7 @@ import {
   normalizeResponsesInput,
 } from "./provider/messages";
 import { reportStreamEvent } from "./provider/response";
+import { createChatPromptCacheHeaders } from "./provider/prompt-cache";
 import { buildChatFunctionTool, toolMode } from "./tools/client-tools";
 import { XAI_WEB_SEARCH_TOOL } from "./tools/hosted-tools";
 import {
@@ -398,6 +399,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
             contentType: "application/json",
             accept: "text/event-stream",
           }),
+          ...(endpoint === "chat/completions" ? createChatPromptCacheHeaders(requestBody) : {}),
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,

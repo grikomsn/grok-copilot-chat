@@ -200,6 +200,57 @@ test("reports VS Code usage in OpenAI shape and accumulates exact xAI cost", () 
   assert.match(formatUsageRows(second, 2000)[0].description, /\$0\.007551 across 2 requests/);
 });
 
+test("normalizes Responses cache and reasoning details into the provider usage shape", () => {
+  const raw = {
+    input_tokens: 125,
+    output_tokens: 48,
+    total_tokens: 173,
+    input_tokens_details: { cached_tokens: 98 },
+    output_tokens_details: { reasoning_tokens: 12 },
+  };
+
+  assert.deepEqual(toProviderUsagePayload(raw), {
+    prompt_tokens: 125,
+    completion_tokens: 48,
+    total_tokens: 173,
+    prompt_tokens_details: { cached_tokens: 98 },
+    completion_tokens_details: { reasoning_tokens: 12 },
+  });
+  assert.deepEqual(recordApiRequestUsage({}, raw, "grok-4.6", 1000).lastRequest, {
+    modelId: "grok-4.6",
+    recordedAt: 1000,
+    promptTokens: 125,
+    completionTokens: 48,
+    totalTokens: 173,
+    cachedTokens: 98,
+    reasoningTokens: 12,
+  });
+});
+
+test("adds non-inclusive Responses cached tokens to prompt and total token counts", () => {
+  const raw = {
+    input_tokens: 4_142,
+    output_tokens: 48,
+    total_tokens: 4_190,
+    input_tokens_details: { cached_tokens: 4_328 },
+  };
+
+  assert.deepEqual(toProviderUsagePayload(raw), {
+    prompt_tokens: 8_470,
+    completion_tokens: 48,
+    total_tokens: 8_518,
+    prompt_tokens_details: { cached_tokens: 4_328 },
+  });
+  assert.deepEqual(recordApiRequestUsage({}, raw, "grok-4.6", 1000).lastRequest, {
+    modelId: "grok-4.6",
+    recordedAt: 1000,
+    promptTokens: 8_470,
+    completionTokens: 48,
+    totalTokens: 8_518,
+    cachedTokens: 4_328,
+  });
+});
+
 test("usage UI explains an account without API quota", () => {
   const snapshot = {
     apiError: "You have run out of API credits.",
