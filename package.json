@@ -111,10 +111,21 @@
           "minimum": 10,
           "description": "Maximum duration of an xAI request in seconds."
         },
+        "grokCopilot.catalogCacheMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "How long the live xAI model catalog is reused before refreshing."
+        },
         "grokCopilot.debugLogging": {
           "type": "boolean",
           "default": false,
           "description": "Log request, usage, stream, and xAI rate-limit header metadata to the Grok output channel. Prompts and OAuth tokens are never logged."
+        },
+        "grokCopilot.showUsageStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Grok API activity and subscription usage in the VS Code status bar."
         }
       }
     },

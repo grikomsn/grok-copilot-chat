@@ -43,7 +43,9 @@ The request and token values returned in xAI response headers are transient thro
 | `grokCopilot.webSearch` | `false` | Allow xAI's native web search and route requests through the Responses API |
 | `grokCopilot.maxOutputTokens` | `16384` | Maximum output tokens requested from Grok |
 | `grokCopilot.requestTimeoutSeconds` | `600` | Request timeout in seconds |
+| `grokCopilot.catalogCacheMinutes` | `5` | Model metadata refresh interval |
 | `grokCopilot.debugLogging` | `false` | Log request, usage, stream, and rate-limit metadata to the Grok output channel |
+| `grokCopilot.showUsageStatusBar` | `true` | Show API activity and subscription usage in the status bar |
 
 Prompts and OAuth tokens are not written to the output channel.
 
