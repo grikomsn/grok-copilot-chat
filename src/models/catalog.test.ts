@@ -4,7 +4,7 @@ import {
   FALLBACK_MODELS,
   parseDiscoveredModels,
   resolveModelTokenLimits,
-} from "./model-limits";
+} from "./catalog";
 
 test("keeps fallback models aligned with the current xAI catalog", () => {
   assert.deepEqual(FALLBACK_MODELS, [

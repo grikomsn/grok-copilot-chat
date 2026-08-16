@@ -1,5 +1,5 @@
-import { applyResponsesReasoningEffort, type ReasoningEffort } from "./model-options";
-import type { ChatStreamEvent, PendingToolCall } from "./sse";
+import { applyResponsesReasoningEffort, type ReasoningEffort } from "../models/options";
+import type { ChatStreamEvent, PendingToolCall } from "./chat-completions";
 
 export interface ResponsesFunctionTool {
   type: "function";

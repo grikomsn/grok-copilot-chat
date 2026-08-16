@@ -6,7 +6,7 @@ import {
   resolveReasoningEffort,
   resolveWebSearch,
   type ReasoningEffort,
-} from "./model-options";
+} from "./models/options";
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   FALLBACK_MODELS,
@@ -16,22 +16,30 @@ import {
   pickTestModel,
   resolveModelTokenLimits,
   type DiscoveredModel,
-} from "./model-limits";
-import { XaiOAuth, type OAuthSession } from "./oauth";
+} from "./models/catalog";
+import { XaiOAuth, type OAuthSession } from "./auth/oauth";
 import {
   XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
   XAI_SUBSCRIPTION_BILLING_PATH,
   buildXaiOAuthHeaders,
-} from "./provider-transport";
-import { ChatCompletionStreamParser, validateStreamCompletion, type ChatStreamEvent } from "./sse";
+} from "./transport/protocol";
+import { ChatCompletionStreamParser, validateStreamCompletion } from "./transport/chat-completions";
 import {
   buildResponsesFunctionTool,
   buildResponsesRequest,
   ResponsesStreamParser,
-  type ResponsesInputContentPart,
-  type ResponsesInputItem,
-} from "./responses";
+} from "./transport/responses";
+import {
+  convertChatMessage,
+  convertResponsesMessage,
+  messageToText,
+  normalizeChatMessages,
+  normalizeResponsesInput,
+} from "./provider/messages";
+import { reportStreamEvent } from "./provider/response";
+import { buildChatFunctionTool, toolMode } from "./tools/client-tools";
+import { XAI_WEB_SEARCH_TOOL } from "./tools/hosted-tools";
 import {
   mergeUsageSnapshot,
   parseAutoTopUpPayload,
@@ -40,30 +48,11 @@ import {
   recordApiRequestUsage,
   toProviderUsagePayload,
   type GrokUsageSnapshot,
-} from "./usage";
+} from "./usage/domain";
 
 export interface GrokModel extends vscode.LanguageModelChatInformation {
   rawModelId: string;
   contextLength: number;
-}
-
-interface ApiMessage {
-  role: "user" | "assistant" | "tool";
-  content: string | null | ApiContentPart[];
-  tool_calls?: ApiToolCall[];
-  tool_call_id?: string;
-}
-
-interface ApiContentPart {
-  type: "text" | "image_url";
-  text?: string;
-  image_url?: { url: string };
-}
-
-interface ApiToolCall {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
 }
 
 interface PendingResponse {
@@ -198,9 +187,9 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     const requestBody = webSearch
       ? buildResponsesRequest(
         model.rawModelId,
-        normalizeResponsesInput(messages.flatMap(convertResponseMessage)),
+        normalizeResponsesInput(messages.flatMap(convertResponsesMessage)),
         [
-          { type: "web_search" },
+          XAI_WEB_SEARCH_TOOL,
           ...(options.tools ?? []).map(buildResponsesFunctionTool),
         ],
         reasoningEffort,
@@ -238,16 +227,16 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
           const result = await reader.read();
           if (result.done) break;
           for (const event of parser.push(decoder.decode(result.value, { stream: true }))) {
-            reportEvent(event, progress);
+            reportStreamEvent(event, progress);
             if (event.usage) finalUsage = event.usage;
           }
         }
         for (const event of parser.push(decoder.decode())) {
-          reportEvent(event, progress);
+          reportStreamEvent(event, progress);
           if (event.usage) finalUsage = event.usage;
         }
         for (const event of parser.finish()) {
-          reportEvent(event, progress);
+          reportStreamEvent(event, progress);
           if (event.usage) finalUsage = event.usage;
         }
         validateStreamCompletion(parser.finishReason);
@@ -464,17 +453,10 @@ function buildRequest(
   const maxTokens = typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
     ? Math.floor(maxOutputTokens)
     : configuredMaxOutput;
-  const tools = (options.tools ?? []).map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: sanitizeSchema(tool.inputSchema),
-    },
-  }));
+  const tools = (options.tools ?? []).map(buildChatFunctionTool);
   return applyReasoningEffort({
     model,
-    messages: normalizeMessages(messages.flatMap(convertMessage)),
+    messages: normalizeChatMessages(messages.flatMap(convertChatMessage)),
     stream: true,
     stream_options: { include_usage: true },
     max_tokens: maxTokens,
@@ -484,152 +466,6 @@ function buildRequest(
 
 function grokConfiguration(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration("grokCopilot");
-}
-
-function convertMessage(message: vscode.LanguageModelChatRequestMessage): ApiMessage[] {
-  const role = message.role === vscode.LanguageModelChatMessageRole.Assistant ? "assistant" : "user";
-  const text: string[] = [];
-  const images: ApiContentPart[] = [];
-  const toolCalls: ApiToolCall[] = [];
-  const results: ApiMessage[] = [];
-
-  for (const part of message.content) {
-    if (part instanceof vscode.LanguageModelTextPart) text.push(part.value);
-    else if (part instanceof vscode.LanguageModelToolCallPart) {
-      toolCalls.push({
-        id: part.callId,
-        type: "function",
-        function: { name: part.name, arguments: JSON.stringify(part.input ?? {}) },
-      });
-    } else if (part instanceof vscode.LanguageModelToolResultPart) {
-      results.push({ role: "tool", tool_call_id: part.callId, content: part.content.map(inputPartText).join("\n") });
-    } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith("image/")) {
-      images.push({
-        type: "image_url",
-        image_url: { url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}` },
-      });
-    }
-  }
-
-  const textValue = text.join("\n");
-  const content: string | ApiContentPart[] = images.length
-    ? [...(textValue ? [{ type: "text" as const, text: textValue }] : []), ...images]
-    : textValue;
-  if (role === "assistant" && toolCalls.length) {
-    return [{ role, content: content || null, tool_calls: toolCalls }];
-  }
-  if (results.length) return content ? [{ role, content }, ...results] : results;
-  return [{ role, content }];
-}
-
-function convertResponseMessage(message: vscode.LanguageModelChatRequestMessage): ResponsesInputItem[] {
-  const role = message.role === vscode.LanguageModelChatMessageRole.Assistant ? "assistant" : "user";
-  const text: string[] = [];
-  const images: ResponsesInputContentPart[] = [];
-  const toolCalls: ResponsesInputItem[] = [];
-  const results: ResponsesInputItem[] = [];
-
-  for (const part of message.content) {
-    if (part instanceof vscode.LanguageModelTextPart) text.push(part.value);
-    else if (part instanceof vscode.LanguageModelToolCallPart) {
-      toolCalls.push({
-        type: "function_call",
-        call_id: part.callId,
-        name: part.name,
-        arguments: JSON.stringify(part.input ?? {}),
-      });
-    } else if (part instanceof vscode.LanguageModelToolResultPart) {
-      results.push({
-        type: "function_call_output",
-        call_id: part.callId,
-        output: part.content.map(inputPartText).join("\n"),
-      });
-    } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith("image/")) {
-      images.push({
-        type: "input_image",
-        image_url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}`,
-      });
-    }
-  }
-
-  const textValue = text.join("\n");
-  const content: string | readonly ResponsesInputContentPart[] = images.length
-    ? [...(textValue ? [{ type: "input_text" as const, text: textValue }] : []), ...images]
-    : textValue;
-  const items: ResponsesInputItem[] = [];
-  if (content || (!toolCalls.length && !results.length)) {
-    items.push({ type: "message", role, content });
-  }
-  if (role === "assistant") items.push(...toolCalls);
-  else items.push(...results);
-  return items;
-}
-
-function normalizeResponsesInput(input: ResponsesInputItem[]): ResponsesInputItem[] {
-  return input.length ? input : [{ type: "message", role: "user", content: "" }];
-}
-
-function normalizeMessages(messages: ApiMessage[]): ApiMessage[] {
-  const filtered = messages.filter((message) =>
-    Boolean(message.tool_calls?.length || message.tool_call_id || (typeof message.content === "string" ? message.content : message.content?.length)),
-  );
-  if (filtered[0]?.role === "assistant") {
-    filtered.unshift({ role: "user", content: "Continue from the previous assistant response." });
-  }
-  return filtered.length ? filtered : [{ role: "user", content: "" }];
-}
-
-function inputPartText(part: vscode.LanguageModelInputPart | unknown): string {
-  if (part instanceof vscode.LanguageModelTextPart) return part.value;
-  if (part instanceof vscode.LanguageModelToolCallPart) return JSON.stringify(part.input ?? {});
-  if (part instanceof vscode.LanguageModelToolResultPart) return part.content.map(inputPartText).join("\n");
-  if (typeof part === "string") return part;
-  return "";
-}
-
-function messageToText(message: vscode.LanguageModelChatRequestMessage): string {
-  return message.content.map(inputPartText).join("\n");
-}
-
-function sanitizeSchema(schema: unknown): Record<string, unknown> {
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return { type: "object", properties: {} };
-  return schema as Record<string, unknown>;
-}
-
-function toolMode(mode: vscode.LanguageModelChatToolMode | undefined): "auto" | "required" {
-  return mode === vscode.LanguageModelChatToolMode.Required ? "required" : "auto";
-}
-
-function reportEvent(
-  event: ChatStreamEvent,
-  progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
-): void {
-  if (event.text) progress.report(new vscode.LanguageModelTextPart(event.text));
-  if (event.reasoning) {
-    const ThinkingPart = (vscode as unknown as { LanguageModelThinkingPart?: typeof vscode.LanguageModelThinkingPart })
-      .LanguageModelThinkingPart;
-    if (ThinkingPart) progress.report(new ThinkingPart(event.reasoning));
-  }
-  for (const tool of event.toolCalls ?? []) {
-    progress.report(new vscode.LanguageModelToolCallPart(
-      tool.id || `grok-tool-${Date.now()}`,
-      tool.name,
-      parseArguments(tool.arguments),
-    ));
-  }
-  if (event.usage) {
-    const data = new TextEncoder().encode(JSON.stringify(toProviderUsagePayload(event.usage)));
-    progress.report(new vscode.LanguageModelDataPart(data, "usage"));
-  }
-}
-
-function parseArguments(value: string): object {
-  try {
-    const parsed = JSON.parse(value || "{}");
-    return typeof parsed === "object" && parsed !== null ? parsed : { value: parsed };
-  } catch {
-    return { value };
-  }
 }
 
 function formatModelName(id: string): string {

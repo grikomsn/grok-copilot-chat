@@ -10,7 +10,7 @@ import {
   parseSubscriptionUsagePayload,
   recordApiRequestUsage,
   toProviderUsagePayload,
-} from "./usage";
+} from "./domain";
 
 test("parses xAI request and token rate-limit headers", () => {
   const values = new Map([

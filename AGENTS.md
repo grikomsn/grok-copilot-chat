@@ -4,13 +4,17 @@
 
 This is a small, strict-TypeScript VS Code extension that exposes xAI Grok as a native Copilot Chat language-model provider. It targets Node.js 22+ and VS Code 1.125+.
 
-- `src/extension.ts`: activation, commands, status/UI, and persisted usage state
-- `src/provider.ts`: model discovery, request conversion, streaming, tools, and API usage capture
-- `src/oauth.ts`: browser/PKCE and device-code OAuth; credentials live in VS Code `SecretStorage`
-- `src/sse.ts`: stateful chat-completion stream parser
-- `src/model-options.ts`: model-specific reasoning configuration
-- `src/usage.ts`: rate-limit, token, cost, and display helpers
-- `src/*.test.ts`: colocated tests using `node:test` and `node:assert/strict`
+- `src/extension.ts`: activation, dependency wiring, and persisted usage state
+- `src/commands/`: sign-in, management, diagnostics, connection, model, and usage commands
+- `src/provider.ts`: language-model provider facade, model discovery, request lifecycle, and usage capture
+- `src/provider/`: message conversion and VS Code response projection
+- `src/auth/`: browser/PKCE and device-code OAuth; credentials live in VS Code `SecretStorage`
+- `src/models/`: model catalog, token limits, and model-specific reasoning configuration
+- `src/transport/`: proxy protocol identity plus Chat Completions and Responses stream dialects
+- `src/tools/`: caller-executed VS Code functions and xAI-hosted tool declarations
+- `src/usage/`: rate-limit, token, cost, subscription, and display helpers
+- `src/vscode/`: proposed VS Code API type augmentations
+- Tests are colocated as `src/**/*.test.ts` using `node:test` and `node:assert/strict`
 - `package.json`: extension manifest, public commands/settings, and scripts
 
 ## Working conventions
