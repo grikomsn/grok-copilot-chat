@@ -441,15 +441,22 @@ function normalizeApiUsage(raw: Record<string, unknown>): Omit<ApiRequestUsage, 
   const completionDetails = isRecord(raw.output_tokens_details)
     ? raw.output_tokens_details
     : isRecord(raw.completion_tokens_details) ? raw.completion_tokens_details : {};
-  const promptTokens = finiteNumber(raw.prompt_tokens ?? raw.input_tokens);
+  const reportedPromptTokens = finiteNumber(raw.prompt_tokens ?? raw.input_tokens);
   const completionTokens = finiteNumber(raw.completion_tokens ?? raw.output_tokens);
+  const cachedTokens = finiteNumber(promptDetails.cached_tokens);
+  const promptTokens = reportedPromptTokens === undefined
+    ? undefined
+    : cachedTokens !== undefined && cachedTokens > reportedPromptTokens
+      ? reportedPromptTokens + cachedTokens
+      : reportedPromptTokens;
+  const totalTokens = promptTokens !== undefined && completionTokens !== undefined
+    ? promptTokens + completionTokens
+    : finiteNumber(raw.total_tokens);
   return compactObject({
     promptTokens,
     completionTokens,
-    totalTokens: finiteNumber(raw.total_tokens) ?? (
-      promptTokens !== undefined && completionTokens !== undefined ? promptTokens + completionTokens : undefined
-    ),
-    cachedTokens: finiteNumber(promptDetails.cached_tokens),
+    totalTokens,
+    cachedTokens,
     reasoningTokens: finiteNumber(completionDetails.reasoning_tokens),
     costUsdTicks: finiteNumber(raw.cost_in_usd_ticks),
   });
