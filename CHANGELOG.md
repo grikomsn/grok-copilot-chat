@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+### Patch Changes
+
+- 8d3c4e3: Preserve xAI Responses cache and reasoning token usage in Copilot Chat and improve prompt-cache affinity across turns.
+
 ## 0.5.0
 
 ### Minor Changes
