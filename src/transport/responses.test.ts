@@ -5,6 +5,7 @@ import {
   buildResponsesRequest,
   ResponsesStreamParser,
 } from "./responses";
+import { createPromptCacheKey } from "../provider/prompt-cache";
 
 test("builds a Responses request with native web search and client tools", () => {
   const body = buildResponsesRequest(
@@ -25,6 +26,19 @@ test("builds a Responses request with native web search and client tools", () =>
   assert.deepEqual(body, {
     model: "grok-4.6",
     input: [{ type: "message", role: "user", content: "Find the latest xAI release." }],
+    prompt_cache_key: createPromptCacheKey({
+      model: "grok-4.6",
+      input: [{ type: "message", role: "user", content: "Find the latest xAI release." }],
+      tools: [
+        { type: "web_search" },
+        {
+          type: "function",
+          name: "save_note",
+          description: "Save a note",
+          parameters: { type: "object", properties: { text: { type: "string" } } },
+        },
+      ],
+    }),
     stream: true,
     store: false,
     max_output_tokens: 4096,
@@ -77,6 +91,19 @@ test("parses fragmented Responses text and client function calls", () => {
   assert.equal(events.at(-1)?.finishReason, "stop");
   assert.equal(events.at(-1)?.usage?.input_tokens, 10);
   assert.equal(parser.finishReason, "stop");
+});
+
+test("preserves Responses cache and reasoning usage details", () => {
+  const parser = new ResponsesStreamParser();
+  const events = parser.push('event: response.done\ndata: {"type":"response.done","response":{"status":"completed","usage":{"input_tokens":125,"output_tokens":48,"total_tokens":173,"input_tokens_details":{"cached_tokens":98},"output_tokens_details":{"reasoning_tokens":12}}}}\n\n');
+
+  assert.deepEqual(events[0]?.usage, {
+    input_tokens: 125,
+    output_tokens: 48,
+    total_tokens: 173,
+    input_tokens_details: { cached_tokens: 98 },
+    output_tokens_details: { reasoning_tokens: 12 },
+  });
 });
 
 test("does not expose server-side tool activity as a VS Code client tool call", () => {

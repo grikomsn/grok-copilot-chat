@@ -435,8 +435,12 @@ function formatDate(value: string): string {
 }
 
 function normalizeApiUsage(raw: Record<string, unknown>): Omit<ApiRequestUsage, "modelId" | "recordedAt"> {
-  const promptDetails = isRecord(raw.prompt_tokens_details) ? raw.prompt_tokens_details : {};
-  const completionDetails = isRecord(raw.completion_tokens_details) ? raw.completion_tokens_details : {};
+  const promptDetails = isRecord(raw.input_tokens_details)
+    ? raw.input_tokens_details
+    : isRecord(raw.prompt_tokens_details) ? raw.prompt_tokens_details : {};
+  const completionDetails = isRecord(raw.output_tokens_details)
+    ? raw.output_tokens_details
+    : isRecord(raw.completion_tokens_details) ? raw.completion_tokens_details : {};
   const promptTokens = finiteNumber(raw.prompt_tokens ?? raw.input_tokens);
   const completionTokens = finiteNumber(raw.completion_tokens ?? raw.output_tokens);
   return compactObject({

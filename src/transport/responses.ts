@@ -1,4 +1,5 @@
 import { applyResponsesReasoningEffort, type ReasoningEffort } from "../models/options";
+import { createPromptCacheKey } from "../provider/prompt-cache";
 import type { ChatStreamEvent, PendingToolCall } from "./chat-completions";
 
 export interface ResponsesFunctionTool {
@@ -69,9 +70,11 @@ export function buildResponsesRequest(
   maxOutputTokens: number,
   toolChoice: "auto" | "required" = "auto",
 ): Record<string, unknown> {
+  const promptCacheKey = createPromptCacheKey({ model, input, tools });
   return applyResponsesReasoningEffort({
     model,
     input,
+    prompt_cache_key: promptCacheKey,
     stream: true,
     store: false,
     max_output_tokens: maxOutputTokens,
