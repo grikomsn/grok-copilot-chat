@@ -29,7 +29,7 @@ export function activate(context: vscode.ExtensionContext): void {
     usageStatus,
     provider.onDidChangeUsage((usage) => {
       renderUsageStatus(usageStatus, usage);
-      usageStatus.show();
+      updateUsageStatusVisibility(usageStatus);
       void context.globalState.update(USAGE_STATE_KEY, usage);
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
