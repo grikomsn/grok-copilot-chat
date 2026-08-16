@@ -9,7 +9,7 @@ import {
   XAI_OAUTH_API_BASE,
   XAI_SUBSCRIPTION_BILLING_PATH,
   buildXaiOAuthHeaders,
-} from "./provider-transport";
+} from "./protocol";
 
 test("uses the official OAuth inference proxy and client headers", () => {
   assert.equal(XAI_OAUTH_API_BASE, "https://cli-chat-proxy.grok.com/v1");

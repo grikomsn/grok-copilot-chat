@@ -7,7 +7,7 @@ import {
   modelEffortSpec,
   resolveReasoningEffort,
   resolveWebSearch,
-} from "./model-options";
+} from "./options";
 
 test("exposes model-specific Grok reasoning levels", () => {
   assert.deepEqual(modelEffortSpec("grok-4.6"), {
