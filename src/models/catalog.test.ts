@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  enrichDiscoveredModel,
   FALLBACK_MODELS,
   parseDiscoveredModels,
   resolveModelTokenLimits,
 } from "./catalog";
+
+test("keeps live xAI metadata authoritative and fills absent models.dev fields", () => {
+  assert.deepEqual(enrichDiscoveredModel(
+    { id: "grok-future", contextLength: 123_000, imageInput: false },
+    { id: "grok-future", contextLength: 999_000, imageInput: true, toolCalling: true },
+  ), { id: "grok-future", contextLength: 123_000, imageInput: false, toolCalling: true });
+});
+
+test("does not treat an unverified models.dev tool negative as authoritative", () => {
+  const model = enrichDiscoveredModel(
+    { id: "grok-4.20-multi-agent-0309" },
+    { id: "grok-4.20-multi-agent-0309", toolCalling: false },
+  );
+  assert.equal(model.toolCalling, undefined);
+});
 
 test("keeps fallback models aligned with the current xAI catalog", () => {
   assert.deepEqual(FALLBACK_MODELS, [

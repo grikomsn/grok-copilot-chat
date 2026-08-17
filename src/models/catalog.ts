@@ -1,3 +1,5 @@
+import type { ModelsDevModelMetadata } from "./metadata";
+
 export const DEFAULT_CONTEXT_LENGTH = 256_000;
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 
@@ -96,6 +98,16 @@ export function cloneDiscoveredModel(model: DiscoveredModel): DiscoveredModel {
     ...(model.contextLength === undefined ? {} : { contextLength: model.contextLength }),
     ...(model.imageInput === undefined ? {} : { imageInput: model.imageInput }),
     ...(model.toolCalling === undefined ? {} : { toolCalling: model.toolCalling }),
+  };
+}
+
+export function enrichDiscoveredModel(model: DiscoveredModel, metadata: ModelsDevModelMetadata | undefined): DiscoveredModel {
+  if (!metadata) return model;
+  return {
+    ...model,
+    contextLength: model.contextLength ?? metadata.contextLength,
+    imageInput: model.imageInput ?? metadata.imageInput,
+    toolCalling: model.toolCalling ?? (metadata.toolCalling === true ? true : undefined),
   };
 }
 

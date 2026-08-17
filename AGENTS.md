@@ -10,6 +10,7 @@ This is a small, strict-TypeScript VS Code extension that exposes xAI Grok as a 
 - `src/provider/`: message conversion and VS Code response projection
 - `src/auth/`: browser/PKCE and device-code OAuth; credentials live in VS Code `SecretStorage`
 - `src/models/`: model catalog, token limits, and model-specific reasoning configuration
+- `src/models/metadata.ts`: persisted models.dev enrichment for fields omitted by xAI discovery
 - `src/transport/`: proxy protocol identity plus Chat Completions and Responses stream dialects
 - `src/tools/`: caller-executed VS Code functions and xAI-hosted tool declarations
 - `src/usage/`: rate-limit, token, cost, subscription, and display helpers
