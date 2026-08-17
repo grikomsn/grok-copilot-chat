@@ -81,10 +81,15 @@ export function buildModelConfigurationSchema(
         group: "navigation",
       } } : {}),
       webSearch: {
-        type: "boolean",
+        type: "string",
         title: "Web Search",
-        description: "Allow Grok to use xAI-hosted web search for this request.",
-        default: defaultWebSearch,
+        enum: ["off", "on"],
+        enumItemLabels: ["Off", "On"],
+        enumDescriptions: [
+          "Do not use xAI-hosted web search",
+          "Allow Grok to use xAI-hosted web search for this request",
+        ],
+        default: defaultWebSearch ? "on" : "off",
         group: "navigation",
       },
     },

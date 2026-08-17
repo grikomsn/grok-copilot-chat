@@ -110,6 +110,7 @@ function normalizeModel(key: string, value: unknown): ModelsDevModelMetadata | u
   const id = stringValue(raw.id) ?? key.trim();
   if (!id) return undefined;
   const modalities = asRecord(raw.modalities);
+  const inputModalities = modalities?.input;
   const limit = asRecord(raw.limit);
   return {
     id,
@@ -117,7 +118,9 @@ function normalizeModel(key: string, value: unknown): ModelsDevModelMetadata | u
     family: optionalString(raw.family),
     contextLength: optionalTokenCount(limit?.context),
     maxOutputTokens: optionalTokenCount(limit?.output),
-    imageInput: stringArray(modalities?.input).includes("image"),
+    imageInput: Array.isArray(inputModalities)
+      ? stringArray(inputModalities).includes("image")
+      : undefined,
     toolCalling: optionalBoolean(raw.tool_call),
     reasoning: optionalBoolean(raw.reasoning),
     releaseDate: optionalString(raw.release_date),

@@ -71,7 +71,8 @@ test("configuration schema exposes a native picker with the workspace default", 
   const schema = buildModelConfigurationSchema("grok-4.3", "medium");
   assert.deepEqual(schema?.properties.reasoningEffort.enum, ["none", "low", "medium", "high"]);
   assert.equal(schema?.properties.reasoningEffort.default, "medium");
-  assert.equal(schema?.properties.webSearch.default, false);
+  assert.deepEqual(schema?.properties.webSearch.enum, ["off", "on"]);
+  assert.equal(schema?.properties.webSearch.default, "off");
 
   const multiAgent = buildModelConfigurationSchema("grok-4.20-multi-agent", "xhigh");
   assert.equal(multiAgent?.properties.reasoningEffort.title, "Agent Effort");
@@ -79,5 +80,5 @@ test("configuration schema exposes a native picker with the workspace default", 
 
   const frontier = buildModelConfigurationSchema("grok-4.6", "xhigh", true);
   assert.deepEqual(frontier?.properties.reasoningEffort.enum, ["low", "medium", "high", "xhigh"]);
-  assert.equal(frontier?.properties.webSearch.default, true);
+  assert.equal(frontier?.properties.webSearch.default, "on");
 });

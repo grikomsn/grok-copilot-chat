@@ -107,7 +107,7 @@ export function enrichDiscoveredModel(model: DiscoveredModel, metadata: ModelsDe
     ...model,
     contextLength: model.contextLength ?? metadata.contextLength,
     imageInput: model.imageInput ?? metadata.imageInput,
-    toolCalling: model.toolCalling ?? metadata.toolCalling,
+    toolCalling: model.toolCalling ?? (metadata.toolCalling === true ? true : undefined),
   };
 }
 

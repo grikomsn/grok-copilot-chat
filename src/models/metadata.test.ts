@@ -33,6 +33,14 @@ test("normalizes the xAI models.dev provider", () => {
   assert.equal(parseCachedModelsDevSnapshot({ fetchedAt: -1, models: {} }), undefined);
 });
 
+test("preserves unknown capabilities when models.dev omits modalities and tools", () => {
+  const snapshot = normalizeModelsDevSnapshot({ xai: { models: {
+    "grok-unknown": { limit: { context: 256_000 } },
+  } } }, 123);
+  assert.equal(snapshot.models["grok-unknown"]?.imageInput, undefined);
+  assert.equal(snapshot.models["grok-unknown"]?.toolCalling, undefined);
+});
+
 test("persists, reuses, and refreshes a models.dev snapshot", async () => {
   const cache = new MemoryCache();
   let now = 1000;
