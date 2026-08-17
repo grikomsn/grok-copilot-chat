@@ -55,6 +55,10 @@
         "title": "Grok: Refresh Models"
       },
       {
+        "command": "grokCopilot.testConnection",
+        "title": "Grok: Test Connection"
+      },
+      {
         "command": "grokCopilot.showUsage",
         "title": "Grok: Show API Activity and Spend"
       },

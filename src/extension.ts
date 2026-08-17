@@ -17,6 +17,7 @@ export function activate(context: vscode.ExtensionContext): void {
     oauth,
     output,
     context.globalState.get<GrokUsageSnapshot>(USAGE_STATE_KEY) ?? {},
+    context.globalState,
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   usageStatus.name = "Grok usage and API activity";
@@ -35,6 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration("grokCopilot.reasoningEffort")
+        || event.affectsConfiguration("grokCopilot.webSearch")
         || event.affectsConfiguration("grokCopilot.maxOutputTokens")
       ) {
         provider.fireDidChange();

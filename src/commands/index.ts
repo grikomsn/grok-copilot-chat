@@ -15,6 +15,7 @@ export function registerCommands(
     vscode.commands.registerCommand("grokCopilot.signIn", () => signInWithBrowser(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.signInDevice", () => signInWithDevice(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.refreshModels", () => refreshModels(provider)),
+    vscode.commands.registerCommand("grokCopilot.testConnection", () => testConnection(provider, output)),
     vscode.commands.registerCommand("grokCopilot.showUsage", () => showUsage(provider, output)),
     vscode.commands.registerCommand("grokCopilot.openUsage", () => openXaiUsage()),
     vscode.commands.registerCommand("grokCopilot.openSubscriptionUsage", () => openGrokUsage()),

@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  enrichDiscoveredModel,
   FALLBACK_MODELS,
   parseDiscoveredModels,
   resolveModelTokenLimits,
 } from "./catalog";
+
+test("keeps live xAI metadata authoritative and fills absent models.dev fields", () => {
+  assert.deepEqual(enrichDiscoveredModel(
+    { id: "grok-future", contextLength: 123_000, imageInput: false },
+    { id: "grok-future", contextLength: 999_000, imageInput: true, toolCalling: true },
+  ), { id: "grok-future", contextLength: 123_000, imageInput: false, toolCalling: true });
+});
 
 test("keeps fallback models aligned with the current xAI catalog", () => {
   assert.deepEqual(FALLBACK_MODELS, [

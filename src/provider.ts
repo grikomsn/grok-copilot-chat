@@ -11,12 +11,14 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   FALLBACK_MODELS,
   cloneDiscoveredModel,
+  enrichDiscoveredModel,
   formatDiscoveredModels,
   parseDiscoveredModels,
   pickTestModel,
   resolveModelTokenLimits,
   type DiscoveredModel,
 } from "./models/catalog";
+import { ModelsDevMetadata, type MetadataCache } from "./models/metadata";
 import { XaiOAuth, type OAuthSession } from "./auth/oauth";
 import {
   XAI_AUTO_TOPUP_PATH,
@@ -69,6 +71,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private models: DiscoveredModel[] = FALLBACK_MODELS.map(cloneDiscoveredModel);
   private lastModelRefreshAt = 0;
   private usage: GrokUsageSnapshot;
+  private readonly metadata: ModelsDevMetadata;
 
   private get configuration(): vscode.WorkspaceConfiguration {
     return grokConfiguration();
@@ -82,8 +85,10 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
     initialUsage: GrokUsageSnapshot = {},
+    metadataCache: MetadataCache = memoryMetadataCache(),
   ) {
     this.usage = initialUsage;
+    this.metadata = new ModelsDevMetadata(metadataCache);
   }
 
   fireDidChange(): void {
@@ -117,7 +122,9 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     this.captureApiLimits(response.headers, "models");
     if (!response.ok) throw await apiError("Unable to list xAI models", response);
     const discovered = parseDiscoveredModels(await response.json());
-    if (discovered.length) this.models = discovered;
+    const metadata = await this.metadata.getOrRefresh();
+    const enriched = discovered.map((model) => enrichDiscoveredModel(model, metadata.models[model.id]));
+    if (enriched.length) this.models = enriched;
     this.lastModelRefreshAt = Date.now();
     this.output.appendLine(`[models] ${formatDiscoveredModels(this.models)}`);
     return this.models;
@@ -156,7 +163,11 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         maxOutputTokens: limits.maxOutputTokens,
         contextLength: limits.contextLength,
         isUserSelectable: true,
-        configurationSchema: buildModelConfigurationSchema(model.id, defaultEffort),
+        configurationSchema: buildModelConfigurationSchema(
+          model.id,
+          defaultEffort,
+          this.configuration.get("webSearch", false),
+        ),
         capabilities: {
           ...(model.imageInput === undefined ? {} : { imageInput: model.imageInput }),
           ...(model.toolCalling === undefined ? {} : { toolCalling: model.toolCalling }),
@@ -443,6 +454,14 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     this.usage = usage;
     this.usageEmitter.fire(this.usage);
   }
+}
+
+function memoryMetadataCache(): MetadataCache {
+  const values = new Map<string, unknown>();
+  return {
+    get<T>(key: string): T | undefined { return values.get(key) as T | undefined; },
+    async update(key: string, value: unknown): Promise<void> { values.set(key, value); },
+  };
 }
 
 function buildRequest(

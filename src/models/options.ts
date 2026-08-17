@@ -17,7 +17,7 @@ const FRONTIER_REASONING: ModelEffortSpec = {
 
 const OPTIONAL_REASONING: ModelEffortSpec = {
   efforts: ["none", "low", "medium", "high"],
-  defaultEffort: "low",
+  defaultEffort: "high",
 };
 
 export function modelEffortSpec(modelId: string): ModelEffortSpec | undefined {
@@ -50,33 +50,41 @@ export function resolveWebSearch(
   requestConfiguration: Readonly<Record<string, unknown>> | undefined,
   workspaceDefault?: unknown,
 ): boolean {
-  return requestConfiguration?.webSearch === true
-    || requestConfiguration?.webSearch === "on"
-    || workspaceDefault === true;
+  if (requestConfiguration?.webSearch === true || requestConfiguration?.webSearch === "on") return true;
+  if (requestConfiguration?.webSearch === false || requestConfiguration?.webSearch === "off") return false;
+  return workspaceDefault === true;
 }
 
 export function buildModelConfigurationSchema(
   modelId: string,
   defaultEffort?: ReasoningEffort,
+  defaultWebSearch = false,
 ): {
   type: "object";
   properties: Record<string, Record<string, unknown>>;
 } | undefined {
   const spec = modelEffortSpec(modelId);
-  if (!spec) return undefined;
-  const selectedDefault = defaultEffort && spec.efforts.includes(defaultEffort)
+  if (!spec && modelId.toLowerCase().includes("imagine")) return undefined;
+  const selectedDefault = spec && defaultEffort && spec.efforts.includes(defaultEffort)
     ? defaultEffort
-    : spec.defaultEffort;
+    : spec?.defaultEffort;
   return {
     type: "object",
     properties: {
-      reasoningEffort: {
+      ...(spec && selectedDefault ? { reasoningEffort: {
         type: "string",
         title: idIsMultiAgent(modelId) ? "Agent Effort" : "Reasoning Effort",
         enum: [...spec.efforts],
         enumItemLabels: spec.efforts.map(formatEffortLabel),
         enumDescriptions: spec.efforts.map((effort) => effortDescription(effort, idIsMultiAgent(modelId))),
         default: selectedDefault,
+        group: "navigation",
+      } } : {}),
+      webSearch: {
+        type: "boolean",
+        title: "Web Search",
+        description: "Allow Grok to use xAI-hosted web search for this request.",
+        default: defaultWebSearch,
         group: "navigation",
       },
     },

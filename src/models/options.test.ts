@@ -20,7 +20,7 @@ test("exposes model-specific Grok reasoning levels", () => {
   });
   assert.deepEqual(modelEffortSpec("grok-4.3"), {
     efforts: ["none", "low", "medium", "high"],
-    defaultEffort: "low",
+    defaultEffort: "high",
   });
   assert.deepEqual(modelEffortSpec("grok-4.20-multi-agent"), {
     efforts: ["low", "medium", "high", "xhigh"],
@@ -32,6 +32,8 @@ test("does not add a reasoning switcher to non-reasoning and unknown models", ()
   assert.equal(modelEffortSpec("grok-4-1-fast-non-reasoning"), undefined);
   assert.equal(modelEffortSpec("grok-4-1-fast-reasoning"), undefined);
   assert.equal(buildModelConfigurationSchema("grok-imagine-image"), undefined);
+  assert.equal(buildModelConfigurationSchema("grok-4-1-fast-non-reasoning")?.properties.reasoningEffort, undefined);
+  assert.equal(buildModelConfigurationSchema("grok-4-1-fast-non-reasoning")?.properties.webSearch.title, "Web Search");
 });
 
 test("request selection overrides the workspace default", () => {
@@ -39,6 +41,7 @@ test("request selection overrides the workspace default", () => {
   assert.equal(resolveWebSearch({ webSearch: true }), true);
   assert.equal(resolveWebSearch({ webSearch: "on" }), true);
   assert.equal(resolveWebSearch({ webSearch: false }), false);
+  assert.equal(resolveWebSearch({ webSearch: false }, true), false);
   assert.equal(resolveWebSearch(undefined, true), true);
   assert.equal(resolveWebSearch(undefined, false), false);
   assert.equal(resolveWebSearch(undefined), false);
@@ -64,14 +67,17 @@ test("unsupported levels fall back to the model default", () => {
 });
 
 test("configuration schema exposes a native picker with the workspace default", () => {
+  assert.equal(buildModelConfigurationSchema("grok-4.3")?.properties.reasoningEffort.default, "high");
   const schema = buildModelConfigurationSchema("grok-4.3", "medium");
   assert.deepEqual(schema?.properties.reasoningEffort.enum, ["none", "low", "medium", "high"]);
   assert.equal(schema?.properties.reasoningEffort.default, "medium");
+  assert.equal(schema?.properties.webSearch.default, false);
 
   const multiAgent = buildModelConfigurationSchema("grok-4.20-multi-agent", "xhigh");
   assert.equal(multiAgent?.properties.reasoningEffort.title, "Agent Effort");
   assert.equal(multiAgent?.properties.reasoningEffort.default, "xhigh");
 
-  const frontier = buildModelConfigurationSchema("grok-4.6", "xhigh");
+  const frontier = buildModelConfigurationSchema("grok-4.6", "xhigh", true);
   assert.deepEqual(frontier?.properties.reasoningEffort.enum, ["low", "medium", "high", "xhigh"]);
+  assert.equal(frontier?.properties.webSearch.default, true);
 });

@@ -23,7 +23,7 @@ declare module "vscode" {
     | LanguageModelThinkingPart;
 
   export type LanguageModelConfigurationSchema = {
-    readonly type?: string;
+    readonly type?: "object";
     readonly properties?: {
       readonly [key: string]: Record<string, unknown> & {
         readonly enumItemLabels?: string[];
