@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+### Minor Changes
+
+- 482b1c9: Add a per-model Web Search toggle with request-level override semantics and expose the live connection test as a command.
+
+### Patch Changes
+
+- 482b1c9: Enrich authoritative xAI model discovery with a persisted, stale-while-revalidate models.dev metadata snapshot.
+- 482b1c9: Default all selectable Grok reasoning-effort controls to High.
+
 ## 0.6.0
 
 ### Minor Changes
