@@ -15,6 +15,7 @@ test("declares native named profile configuration without a management-command o
 
 test("qualifies model IDs by profile and reports invalid saved profiles", () => {
   assert.equal(profileQualifiedModelId("Work", "grok-4"), "work::grok-4");
+  assert.equal(profileQualifiedModelId("default", "grok-4"), "grok-4");
   assert.throws(
     () => profileFromConfiguration({ profile: "work profile" }),
     /Update this provider entry in Manage Language Models/,

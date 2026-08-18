@@ -159,7 +159,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     } catch (error) {
       const message = messageOf(error);
       this.output.appendLine(`[models] ${message}`);
-      void vscode.window.showErrorMessage(message);
+      if (!options.silent) void vscode.window.showErrorMessage(message);
       return [];
     }
     if (!await this.oauth.hasSession(profile)) return [];
