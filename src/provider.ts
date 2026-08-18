@@ -20,6 +20,7 @@ import {
 } from "./models/catalog";
 import { ModelsDevMetadata, type MetadataCache } from "./models/metadata";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
+import { profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
 import {
   XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
@@ -171,7 +172,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         this.configuration.get("reasoningEffort", "high"),
       );
       return {
-        id: model.id,
+        id: profileQualifiedModelId(profile, model.id),
         rawModelId: model.id,
         profile,
         name: formatModelName(model.id),
@@ -184,6 +185,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         contextLength: limits.contextLength,
         isUserSelectable: true,
         isBYOK: true,
+        requiresAuthorization: { label: `xAI Grok (${profile})` },
         configurationSchema: buildModelConfigurationSchema(
           model.id,
           defaultEffort,
@@ -204,7 +206,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    this.activeProfile = model.profile;
     const reasoningEffort = resolveReasoningEffort(
       model.rawModelId,
       options.modelConfiguration,
@@ -480,11 +481,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private modelsFor(profile: string): DiscoveredModel[] {
     return this.modelsByProfile.get(profile) ?? FALLBACK_MODELS.map(cloneDiscoveredModel);
   }
-}
-
-function profileFromConfiguration(configuration: Readonly<Record<string, unknown>>): string {
-  const value = configuration.profile;
-  return normalizeProfileId(typeof value === "string" ? value : DEFAULT_XAI_PROFILE);
 }
 
 function memoryMetadataCache(): MetadataCache {

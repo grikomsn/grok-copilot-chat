@@ -122,7 +122,9 @@ export class XaiOAuth {
   private readonly deviceAuthorizationUrl: string;
   private readonly tokenUrl: string;
   private readonly authorizeUrl: string;
-  private readonly refreshPromises = new Map<string, Promise<OAuthSession>>();
+  private readonly refreshPromises = new Map<string, { identity: string; promise: Promise<OAuthSession> }>();
+  private readonly sessionMutations = new Map<string, Promise<void>>();
+  private profileIndexMutation: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly store: SessionStore,
@@ -328,14 +330,7 @@ export class XaiOAuth {
     if (!forceRefresh && session.expiresAt - this.now() > REFRESH_SKEW_MS) {
       return session;
     }
-    let refreshPromise = this.refreshPromises.get(normalized);
-    if (!refreshPromise) {
-      refreshPromise = this.refresh(session, normalized).finally(() => {
-        this.refreshPromises.delete(normalized);
-      });
-      this.refreshPromises.set(normalized, refreshPromise);
-    }
-    return refreshPromise;
+    return this.refresh(session, normalized);
   }
 
   async getAccessToken(forceRefresh = false, profile = DEFAULT_XAI_PROFILE): Promise<string> {
@@ -366,32 +361,39 @@ export class XaiOAuth {
 
   async signOut(profile = DEFAULT_XAI_PROFILE): Promise<void> {
     const normalized = normalizeProfileId(profile);
-    await this.store.delete(sessionSecret(normalized));
-    const profiles = (await this.listProfiles()).filter((value) => value !== normalized);
-    await this.store.store(XAI_PROFILES_SECRET, JSON.stringify(profiles));
+    await this.mutateSession(normalized, async () => {
+      await this.store.delete(sessionSecret(normalized));
+      await this.mutateProfileIndex((profiles) => profiles.delete(normalized));
+    });
   }
 
   private async refresh(session: OAuthSession, profile: string): Promise<OAuthSession> {
-    const response = await this.fetcher(this.tokenUrl, {
-      method: "POST",
-      headers: formHeaders(this.userAgent),
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: session.refreshToken,
-        client_id: CLIENT_ID,
-      }),
+    const identity = sessionIdentity(session);
+    const existing = this.refreshPromises.get(profile);
+    if (existing?.identity === identity) return existing.promise;
+    let promise: Promise<OAuthSession>;
+    promise = (async () => {
+      const response = await this.fetcher(this.tokenUrl, {
+        method: "POST",
+        headers: formHeaders(this.userAgent),
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: session.refreshToken,
+          client_id: CLIENT_ID,
+        }),
+      });
+      if (!response.ok) throw await responseError("xAI token refresh failed; sign in again", response);
+      const refreshed = toSession((await response.json()) as TokenResponse, session.refreshToken, this.now(), session);
+      await this.mutateSession(profile, async () => {
+        const current = await this.readSession(profile);
+        if (current && sessionIdentity(current) === identity) await this.storeSession(refreshed, profile);
+      });
+      return refreshed;
+    })().finally(() => {
+      if (this.refreshPromises.get(profile)?.promise === promise) this.refreshPromises.delete(profile);
     });
-    if (!response.ok) {
-      throw await responseError("xAI token refresh failed; sign in again", response);
-    }
-    const refreshed = toSession(
-      (await response.json()) as TokenResponse,
-      session.refreshToken,
-      this.now(),
-      session,
-    );
-    await this.writeSession(refreshed, profile);
-    return refreshed;
+    this.refreshPromises.set(profile, { identity, promise });
+    return promise;
   }
 
   private async exchangeAuthorizationCode(code: string, verifier: string, profile: string): Promise<OAuthSession> {
@@ -414,12 +416,49 @@ export class XaiOAuth {
 
   private async writeSession(session: OAuthSession, profile: string): Promise<void> {
     const normalized = normalizeProfileId(profile);
+    await this.mutateSession(normalized, () => this.storeSession(session, normalized));
+  }
+
+  private async storeSession(session: OAuthSession, profile: string): Promise<void> {
+    const normalized = normalizeProfileId(profile);
     await this.store.store(sessionSecret(normalized), JSON.stringify(session));
-    const profiles = await this.listProfiles();
-    if (!profiles.includes(normalized)) {
-      await this.store.store(XAI_PROFILES_SECRET, JSON.stringify([...profiles, normalized].sort()));
+    await this.mutateProfileIndex((profiles) => { profiles.add(normalized); });
+  }
+
+  private async readProfileIndex(): Promise<Set<string>> {
+    const raw = await this.store.get(XAI_PROFILES_SECRET);
+    try {
+      const parsed = JSON.parse(raw ?? "[]") as unknown;
+      return new Set(Array.isArray(parsed) ? parsed.flatMap((value) => {
+        try { return typeof value === "string" ? [normalizeProfileId(value)] : []; } catch { return []; }
+      }) : []);
+    } catch {
+      return new Set<string>();
     }
   }
+
+  private async mutateSession(profile: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.sessionMutations.get(profile) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.sessionMutations.set(profile, current);
+    try { await current; } finally {
+      if (this.sessionMutations.get(profile) === current) this.sessionMutations.delete(profile);
+    }
+  }
+
+  private async mutateProfileIndex(operation: (profiles: Set<string>) => void): Promise<void> {
+    const current = this.profileIndexMutation.catch(() => undefined).then(async () => {
+      const profiles = await this.readProfileIndex();
+      operation(profiles);
+      await this.store.store(XAI_PROFILES_SECRET, JSON.stringify([...profiles].sort()));
+    });
+    this.profileIndexMutation = current;
+    await current;
+  }
+}
+
+function sessionIdentity(session: OAuthSession): string {
+  return `${session.accessToken}\u0000${session.refreshToken}\u0000${session.expiresAt}`;
 }
 
 export function buildAuthorizeUrl(authorizeUrl: string, challenge: string, state: string, nonce: string): string {

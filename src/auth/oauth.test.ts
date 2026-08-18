@@ -141,6 +141,46 @@ test("keeps profile sessions and refresh locks isolated", async () => {
   assert.deepEqual(await client.listProfiles(), ["default", "work"]);
 });
 
+test("serializes concurrent profile-index updates", async () => {
+  const store = new MemoryStore();
+  const originalStore = store.store.bind(store);
+  store.store = async (key, value) => {
+    if (key.includes("OAuthProfiles")) await new Promise((resolve) => setTimeout(resolve, 5));
+    await originalStore(key, value);
+  };
+  let token = 0;
+  const client = new XaiOAuth(store, {
+    now: () => 1_000,
+    sleep: async () => {},
+    fetch: async () => Response.json({ access_token: `access-${++token}`, refresh_token: "refresh", expires_in: 3600 }),
+  });
+  const device = { device_code: "device", user_code: "code", verification_uri: "https://x.ai/device" };
+  await Promise.all([
+    client.completeDeviceSignIn(device, undefined, "personal"),
+    client.completeDeviceSignIn(device, undefined, "work"),
+  ]);
+  assert.deepEqual(await client.listProfiles(), ["personal", "work"]);
+});
+
+test("does not persist a refresh that finishes after sign-out", async () => {
+  const store = new MemoryStore();
+  await store.store(`${XAI_SESSION_SECRET}.work`, JSON.stringify({ accessToken: "old", refreshToken: "refresh", expiresAt: 0 }));
+  let release!: () => void;
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  const client = new XaiOAuth(store, {
+    now: () => 1_000,
+    fetch: async () => {
+      await wait;
+      return Response.json({ access_token: "new", refresh_token: "rotated", expires_in: 3600 });
+    },
+  });
+  const refreshing = client.getAccessToken(false, "work");
+  await client.signOut("work");
+  release();
+  await refreshing;
+  assert.equal(await client.hasSession("work"), false);
+});
+
 interface CallbackResponse {
   status: number;
   headers: Record<string, string | string[] | undefined>;

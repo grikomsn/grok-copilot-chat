@@ -166,7 +166,13 @@ async function addAccount(oauth: XaiOAuth, provider: GrokProvider, output: vscod
     );
     if (replace !== "Replace") return;
   }
-  await signInWithBrowser(oauth, provider, output, profile);
+  const method = await vscode.window.showQuickPick([
+    { label: "$(globe) Sign in in browser", method: "browser" as const },
+    { label: "$(key) Sign in with a device code", method: "device" as const },
+  ], { title: `Sign in to xAI profile “${profile}”` });
+  if (!method) return;
+  if (method.method === "browser") await signInWithBrowser(oauth, provider, output, profile);
+  else await signInWithDevice(oauth, provider, output, profile);
   if (await oauth.hasSession(profile)) {
     vscode.window.showInformationMessage(`Add xAI Grok in Manage Language Models and enter profile “${profile}”.`);
   }
