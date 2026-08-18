@@ -11,10 +11,12 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 ## Install and connect
 
 1. Install the extension from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat).
-2. Run **Grok: Sign In to xAI** from the Command Palette.
-3. Authorize the extension in the browser. If the local callback cannot be reached, run **Grok: Sign In to xAI with Device Code** instead.
-4. In Copilot Chat, open the model picker, select **Manage Models**, and enable **xAI Grok**.
-5. Select an available Grok model.
+2. Run **Grok: Add xAI Account**, choose a profile ID such as `personal`, and authorize the extension in the browser.
+3. Open **Manage Language Models**, choose **Add Models**, select **xAI Grok**, and enter that profile ID.
+4. Repeat those steps with a different profile ID to add another xAI account. Browser sign-ins are sequential because the temporary loopback callback uses one local port.
+5. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile.
+
+If the local callback cannot be reached, select the intended profile with **Grok: Select Active Profile** and run **Grok: Sign In to xAI with Device Code**.
 
 Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker and default to High. Models also expose a **Web Search** toggle; it is off by default, routes enabled requests through xAI's Responses API, and overrides the `grokCopilot.webSearch` workspace default for that request. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a reasoning picker because their legacy contracts do not accept the current reasoning parameter.
 
@@ -23,6 +25,8 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 | Command | Purpose |
 | --- | --- |
 | **Grok: Manage xAI Connection** | Test the connection, refresh models, show logs, or sign out |
+| **Grok: Add xAI Account** | Create or replace a named OAuth profile |
+| **Grok: Select Active Profile** | Choose the profile used by usage and management commands |
 | **Grok: Sign In to xAI** | Start browser/PKCE authorization |
 | **Grok: Sign In to xAI with Device Code** | Authorize without a loopback browser callback |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |
@@ -54,7 +58,7 @@ Prompts and OAuth tokens are not written to the output channel.
 
 ## Troubleshooting
 
-- **No Grok models in the picker:** enable **xAI Grok** under **Manage Models**, then run **Grok: Refresh Models**.
+- **No Grok models in the picker:** sign in with **Grok: Add xAI Account**, then add an xAI Grok entry with the same profile ID in **Manage Language Models**.
 - **Browser sign-in cannot complete:** cancel it and use the device-code command.
 - **Authentication or API errors:** open **Grok: Manage xAI Connection**, test the connection, and inspect the Grok output channel.
 - **Context window stays at 0%:** start a new chat after updating the extension. Completed Grok responses report exact input/output usage to VS Code; old sessions do not gain usage retroactively.

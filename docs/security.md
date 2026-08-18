@@ -2,7 +2,7 @@
 
 ## Credential storage
 
-Access and refresh tokens are stored in VS Code `SecretStorage`. They are not written to workspace settings, files, or extension logs. Expired access tokens are refreshed automatically, including refresh-token rotation when xAI returns a replacement.
+Access and refresh tokens are stored per named profile in VS Code `SecretStorage`. The profile ID in **Manage Language Models** selects the matching secret; tokens are not written to workspace settings, files, model metadata, or extension logs. Expired access tokens are refreshed automatically with a separate refresh lock per profile, including refresh-token rotation when xAI returns a replacement.
 
 The extension supports two OAuth paths:
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import test from "node:test";
-import { buildAuthorizeUrl, XaiOAuth, XAI_SESSION_SECRET, type SessionStore } from "./oauth";
+import { buildAuthorizeUrl, normalizeProfileId, XaiOAuth, XAI_SESSION_SECRET, type SessionStore } from "./oauth";
 
 class MemoryStore implements SessionStore {
   readonly values = new Map<string, string>();
@@ -16,6 +16,11 @@ test("browser OAuth URL uses PKCE and the registered loopback redirect", () => {
   assert.equal(url.searchParams.get("redirect_uri"), "http://127.0.0.1:56121/callback");
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
   assert.match(url.searchParams.get("scope") ?? "", /api:access/);
+});
+
+test("normalizes safe profile IDs", () => {
+  assert.equal(normalizeProfileId(" Work.Profile "), "work.profile");
+  assert.throws(() => normalizeProfileId("work profile"), /Profile IDs/);
 });
 
 test("browser OAuth callback rejects forged requests and does not reflect provider errors", async (t) => {
@@ -111,6 +116,29 @@ test("expired sessions refresh once for concurrent callers", async () => {
   });
   assert.deepEqual(await Promise.all([client.getAccessToken(), client.getAccessToken()]), ["new", "new"]);
   assert.equal(refreshes, 1);
+});
+
+test("keeps profile sessions and refresh locks isolated", async () => {
+  const store = new MemoryStore();
+  const expired = JSON.stringify({ accessToken: "old", refreshToken: "refresh", expiresAt: 0 });
+  await store.store(XAI_SESSION_SECRET, expired);
+  await store.store(`${XAI_SESSION_SECRET}.work`, expired);
+  let refreshes = 0;
+  const client = new XaiOAuth(store, {
+    now: () => 1_000,
+    fetch: async () => {
+      refreshes++;
+      return Response.json({ access_token: `new-${refreshes}`, refresh_token: "rotated", expires_in: 3600 });
+    },
+  });
+
+  const [personal, work] = await Promise.all([
+    client.getAccessToken(false, "default"),
+    client.getAccessToken(false, "work"),
+  ]);
+  assert.notEqual(personal, work);
+  assert.equal(refreshes, 2);
+  assert.deepEqual(await client.listProfiles(), ["default", "work"]);
 });
 
 interface CallbackResponse {

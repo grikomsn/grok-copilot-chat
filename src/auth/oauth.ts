@@ -13,6 +13,20 @@ const OAUTH_CALLBACK_PATH = "/callback";
 const REDIRECT_URI = `http://${OAUTH_HOST}:${OAUTH_PORT}${OAUTH_CALLBACK_PATH}`;
 const OAUTH_CALLBACK_HOST = `${OAUTH_HOST}:${OAUTH_PORT}`;
 export const XAI_SESSION_SECRET = "grokCopilot.xaiOAuthSession";
+export const DEFAULT_XAI_PROFILE = "default";
+const XAI_PROFILES_SECRET = "grokCopilot.xaiOAuthProfiles.v1";
+
+export function normalizeProfileId(value: string): string {
+  const profile = value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(profile)) {
+    throw new Error("Profile IDs must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens");
+  }
+  return profile;
+}
+
+function sessionSecret(profile: string): string {
+  return profile === DEFAULT_XAI_PROFILE ? XAI_SESSION_SECRET : `${XAI_SESSION_SECRET}.${profile}`;
+}
 
 export interface OAuthSession {
   accessToken: string;
@@ -108,7 +122,7 @@ export class XaiOAuth {
   private readonly deviceAuthorizationUrl: string;
   private readonly tokenUrl: string;
   private readonly authorizeUrl: string;
-  private refreshPromise: Promise<OAuthSession> | undefined;
+  private readonly refreshPromises = new Map<string, Promise<OAuthSession>>();
 
   constructor(
     private readonly store: SessionStore,
@@ -123,12 +137,13 @@ export class XaiOAuth {
     this.authorizeUrl = options.authorizeUrl ?? AUTHORIZE_URL;
   }
 
-  async hasSession(): Promise<boolean> {
-    return Boolean(await this.readSession());
+  async hasSession(profile = DEFAULT_XAI_PROFILE): Promise<boolean> {
+    return Boolean(await this.readSession(profile));
   }
 
-  async readSession(): Promise<OAuthSession | undefined> {
-    const raw = await this.store.get(XAI_SESSION_SECRET);
+  async readSession(profile = DEFAULT_XAI_PROFILE): Promise<OAuthSession | undefined> {
+    const normalized = normalizeProfileId(profile);
+    const raw = await this.store.get(sessionSecret(normalized));
     if (!raw) return undefined;
     try {
       const session = JSON.parse(raw) as Partial<OAuthSession>;
@@ -161,7 +176,8 @@ export class XaiOAuth {
     return device;
   }
 
-  async startBrowserSignIn(): Promise<BrowserSignIn> {
+  async startBrowserSignIn(profile = DEFAULT_XAI_PROFILE): Promise<BrowserSignIn> {
+    const normalized = normalizeProfileId(profile);
     const pkce = await generatePkce();
     const state = randomUrlSafe(32);
     const nonce = randomUrlSafe(32);
@@ -216,7 +232,7 @@ export class XaiOAuth {
           return;
         }
         try {
-          const session = await this.exchangeAuthorizationCode(code, pkce.verifier);
+          const session = await this.exchangeAuthorizationCode(code, pkce.verifier, normalized);
           settled = true;
           sendCallbackHtml(response, 200, "Signed in to xAI", "You can close this tab and return to Visual Studio Code.");
           close();
@@ -254,7 +270,12 @@ export class XaiOAuth {
     };
   }
 
-  async completeDeviceSignIn(device: DeviceCode, signal?: AbortSignal): Promise<OAuthSession> {
+  async completeDeviceSignIn(
+    device: DeviceCode,
+    signal?: AbortSignal,
+    profile = DEFAULT_XAI_PROFILE,
+  ): Promise<OAuthSession> {
+    const normalized = normalizeProfileId(profile);
     const deadline = this.now() + positiveSeconds(device.expires_in, 300) * 1000;
     let interval = Math.max(positiveSeconds(device.interval, 5) * 1000, 1000);
 
@@ -273,7 +294,7 @@ export class XaiOAuth {
 
       if (response.ok) {
         const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-        await this.writeSession(session);
+        await this.writeSession(session, normalized);
         return session;
       }
 
@@ -300,29 +321,57 @@ export class XaiOAuth {
     throw new Error("The xAI sign-in code expired; start sign-in again");
   }
 
-  async getSession(forceRefresh = false): Promise<OAuthSession> {
-    const session = await this.readSession();
+  async getSession(forceRefresh = false, profile = DEFAULT_XAI_PROFILE): Promise<OAuthSession> {
+    const normalized = normalizeProfileId(profile);
+    const session = await this.readSession(normalized);
     if (!session) throw new Error("Sign in to xAI before using a Grok model");
     if (!forceRefresh && session.expiresAt - this.now() > REFRESH_SKEW_MS) {
       return session;
     }
-    if (!this.refreshPromise) {
-      this.refreshPromise = this.refresh(session).finally(() => {
-        this.refreshPromise = undefined;
+    let refreshPromise = this.refreshPromises.get(normalized);
+    if (!refreshPromise) {
+      refreshPromise = this.refresh(session, normalized).finally(() => {
+        this.refreshPromises.delete(normalized);
       });
+      this.refreshPromises.set(normalized, refreshPromise);
     }
-    return this.refreshPromise;
+    return refreshPromise;
   }
 
-  async getAccessToken(forceRefresh = false): Promise<string> {
-    return (await this.getSession(forceRefresh)).accessToken;
+  async getAccessToken(forceRefresh = false, profile = DEFAULT_XAI_PROFILE): Promise<string> {
+    return (await this.getSession(forceRefresh, profile)).accessToken;
   }
 
-  async signOut(): Promise<void> {
-    await this.store.delete(XAI_SESSION_SECRET);
+  async listProfiles(): Promise<string[]> {
+    const raw = await this.store.get(XAI_PROFILES_SECRET);
+    let candidates: string[] = [];
+    try {
+      const parsed = JSON.parse(raw ?? "[]") as unknown;
+      if (Array.isArray(parsed)) candidates = parsed.filter((value): value is string => typeof value === "string");
+    } catch {
+      // A corrupt profile index is rebuilt from the legacy default session.
+    }
+    candidates.push(DEFAULT_XAI_PROFILE);
+    const profiles: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const profile = normalizeProfileId(candidate);
+        if (!profiles.includes(profile) && await this.readSession(profile)) profiles.push(profile);
+      } catch {
+        // Invalid index entries are ignored.
+      }
+    }
+    return profiles.sort();
   }
 
-  private async refresh(session: OAuthSession): Promise<OAuthSession> {
+  async signOut(profile = DEFAULT_XAI_PROFILE): Promise<void> {
+    const normalized = normalizeProfileId(profile);
+    await this.store.delete(sessionSecret(normalized));
+    const profiles = (await this.listProfiles()).filter((value) => value !== normalized);
+    await this.store.store(XAI_PROFILES_SECRET, JSON.stringify(profiles));
+  }
+
+  private async refresh(session: OAuthSession, profile: string): Promise<OAuthSession> {
     const response = await this.fetcher(this.tokenUrl, {
       method: "POST",
       headers: formHeaders(this.userAgent),
@@ -341,11 +390,11 @@ export class XaiOAuth {
       this.now(),
       session,
     );
-    await this.writeSession(refreshed);
+    await this.writeSession(refreshed, profile);
     return refreshed;
   }
 
-  private async exchangeAuthorizationCode(code: string, verifier: string): Promise<OAuthSession> {
+  private async exchangeAuthorizationCode(code: string, verifier: string, profile: string): Promise<OAuthSession> {
     const response = await this.fetcher(this.tokenUrl, {
       method: "POST",
       headers: formHeaders(this.userAgent),
@@ -359,12 +408,17 @@ export class XaiOAuth {
     });
     if (!response.ok) throw await responseError("xAI authorization-code exchange failed", response);
     const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-    await this.writeSession(session);
+    await this.writeSession(session, profile);
     return session;
   }
 
-  private async writeSession(session: OAuthSession): Promise<void> {
-    await this.store.store(XAI_SESSION_SECRET, JSON.stringify(session));
+  private async writeSession(session: OAuthSession, profile: string): Promise<void> {
+    const normalized = normalizeProfileId(profile);
+    await this.store.store(sessionSecret(normalized), JSON.stringify(session));
+    const profiles = await this.listProfiles();
+    if (!profiles.includes(normalized)) {
+      await this.store.store(XAI_PROFILES_SECRET, JSON.stringify([...profiles, normalized].sort()));
+    }
   }
 }
 
