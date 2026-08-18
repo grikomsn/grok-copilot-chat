@@ -181,6 +181,35 @@ test("does not persist a refresh that finishes after sign-out", async () => {
   assert.equal(await client.hasSession("work"), false);
 });
 
+test("does not return a refresh invalidated during SecretStorage persistence", async () => {
+  const store = new MemoryStore();
+  await store.store(`${XAI_SESSION_SECRET}.work`, JSON.stringify({ accessToken: "old", refreshToken: "refresh", expiresAt: 0 }));
+  let persistenceStarted!: () => void;
+  let releasePersistence!: () => void;
+  const started = new Promise<void>((resolve) => { persistenceStarted = resolve; });
+  const wait = new Promise<void>((resolve) => { releasePersistence = resolve; });
+  const originalStore = store.store.bind(store);
+  store.store = async (key, value) => {
+    await originalStore(key, value);
+    if (key === `${XAI_SESSION_SECRET}.work` && value.includes('"accessToken":"new"')) {
+      persistenceStarted();
+      await wait;
+    }
+  };
+  const client = new XaiOAuth(store, {
+    now: () => 1_000,
+    fetch: async () => Response.json({ access_token: "new", refresh_token: "rotated", expires_in: 3600 }),
+  });
+
+  const refreshing = client.getAccessToken(false, "work");
+  await started;
+  const signingOut = client.signOut("work");
+  releasePersistence();
+  await assert.rejects(refreshing, /changed while its session was refreshing/);
+  await signingOut;
+  assert.equal(await client.hasSession("work"), false);
+});
+
 test("does not persist a device sign-in that finishes after sign-out", async () => {
   const store = new MemoryStore();
   let release!: () => void;
@@ -201,6 +230,36 @@ test("does not persist a device sign-in that finishes after sign-out", async () 
   await client.signOut("work");
   release();
   await assert.rejects(signingIn, /was superseded/);
+  assert.equal(await client.hasSession("work"), false);
+});
+
+test("does not return a device sign-in invalidated during SecretStorage persistence", async () => {
+  const store = new MemoryStore();
+  let persistenceStarted!: () => void;
+  let releasePersistence!: () => void;
+  const started = new Promise<void>((resolve) => { persistenceStarted = resolve; });
+  const wait = new Promise<void>((resolve) => { releasePersistence = resolve; });
+  const originalStore = store.store.bind(store);
+  store.store = async (key, value) => {
+    await originalStore(key, value);
+    if (key === `${XAI_SESSION_SECRET}.work`) {
+      persistenceStarted();
+      await wait;
+    }
+  };
+  const client = new XaiOAuth(store, {
+    now: () => 1_000,
+    sleep: async () => {},
+    fetch: async () => Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 }),
+  });
+  const device = { device_code: "device", user_code: "code", verification_uri: "https://x.ai/device" };
+
+  const signingIn = client.completeDeviceSignIn(device, undefined, "work");
+  await started;
+  const signingOut = client.signOut("work");
+  releasePersistence();
+  await assert.rejects(signingIn, /was superseded/);
+  await signingOut;
   assert.equal(await client.hasSession("work"), false);
 });
 

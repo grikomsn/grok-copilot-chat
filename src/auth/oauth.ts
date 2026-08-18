@@ -373,6 +373,7 @@ export class XaiOAuth {
 
   private async refresh(session: OAuthSession, profile: string): Promise<OAuthSession> {
     const identity = sessionIdentity(session);
+    const generation = this.profileGeneration(profile);
     const existing = this.refreshPromises.get(profile);
     if (existing?.identity === identity) return existing.promise;
     let promise: Promise<OAuthSession>;
@@ -391,9 +392,9 @@ export class XaiOAuth {
       let persisted = false;
       await this.mutateSession(profile, async () => {
         const current = await this.readSession(profile);
-        if (current && sessionIdentity(current) === identity) {
+        if (this.profileGeneration(profile) === generation && current && sessionIdentity(current) === identity) {
           await this.storeSession(refreshed, profile);
-          persisted = true;
+          persisted = this.profileGeneration(profile) === generation;
         }
       });
       if (!persisted) throw new Error(`xAI profile “${profile}” changed while its session was refreshing`);
@@ -430,6 +431,9 @@ export class XaiOAuth {
         throw new Error(`xAI sign-in for profile “${normalized}” was superseded`);
       }
       await this.storeSession(session, normalized);
+      if (this.profileGeneration(normalized) !== expectedGeneration) {
+        throw new Error(`xAI sign-in for profile “${normalized}” was superseded`);
+      }
     });
   }
 
