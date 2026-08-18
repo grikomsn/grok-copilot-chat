@@ -125,6 +125,7 @@ export class XaiOAuth {
   private readonly refreshPromises = new Map<string, { identity: string; promise: Promise<OAuthSession> }>();
   private readonly sessionMutations = new Map<string, Promise<void>>();
   private profileIndexMutation: Promise<void> = Promise.resolve();
+  private readonly profileGenerations = new Map<string, number>();
 
   constructor(
     private readonly store: SessionStore,
@@ -180,6 +181,7 @@ export class XaiOAuth {
 
   async startBrowserSignIn(profile = DEFAULT_XAI_PROFILE): Promise<BrowserSignIn> {
     const normalized = normalizeProfileId(profile);
+    const generation = this.beginSessionReplacement(normalized);
     const pkce = await generatePkce();
     const state = randomUrlSafe(32);
     const nonce = randomUrlSafe(32);
@@ -234,7 +236,7 @@ export class XaiOAuth {
           return;
         }
         try {
-          const session = await this.exchangeAuthorizationCode(code, pkce.verifier, normalized);
+          const session = await this.exchangeAuthorizationCode(code, pkce.verifier, normalized, generation);
           settled = true;
           sendCallbackHtml(response, 200, "Signed in to xAI", "You can close this tab and return to Visual Studio Code.");
           close();
@@ -278,6 +280,7 @@ export class XaiOAuth {
     profile = DEFAULT_XAI_PROFILE,
   ): Promise<OAuthSession> {
     const normalized = normalizeProfileId(profile);
+    const generation = this.beginSessionReplacement(normalized);
     const deadline = this.now() + positiveSeconds(device.expires_in, 300) * 1000;
     let interval = Math.max(positiveSeconds(device.interval, 5) * 1000, 1000);
 
@@ -296,7 +299,7 @@ export class XaiOAuth {
 
       if (response.ok) {
         const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-        await this.writeSession(session, normalized);
+        await this.writeSession(session, normalized, generation);
         return session;
       }
 
@@ -361,6 +364,7 @@ export class XaiOAuth {
 
   async signOut(profile = DEFAULT_XAI_PROFILE): Promise<void> {
     const normalized = normalizeProfileId(profile);
+    this.invalidateProfile(normalized);
     await this.mutateSession(normalized, async () => {
       await this.store.delete(sessionSecret(normalized));
       await this.mutateProfileIndex((profiles) => profiles.delete(normalized));
@@ -384,10 +388,15 @@ export class XaiOAuth {
       });
       if (!response.ok) throw await responseError("xAI token refresh failed; sign in again", response);
       const refreshed = toSession((await response.json()) as TokenResponse, session.refreshToken, this.now(), session);
+      let persisted = false;
       await this.mutateSession(profile, async () => {
         const current = await this.readSession(profile);
-        if (current && sessionIdentity(current) === identity) await this.storeSession(refreshed, profile);
+        if (current && sessionIdentity(current) === identity) {
+          await this.storeSession(refreshed, profile);
+          persisted = true;
+        }
       });
+      if (!persisted) throw new Error(`xAI profile “${profile}” changed while its session was refreshing`);
       return refreshed;
     })().finally(() => {
       if (this.refreshPromises.get(profile)?.promise === promise) this.refreshPromises.delete(profile);
@@ -396,7 +405,7 @@ export class XaiOAuth {
     return promise;
   }
 
-  private async exchangeAuthorizationCode(code: string, verifier: string, profile: string): Promise<OAuthSession> {
+  private async exchangeAuthorizationCode(code: string, verifier: string, profile: string, generation: number): Promise<OAuthSession> {
     const response = await this.fetcher(this.tokenUrl, {
       method: "POST",
       headers: formHeaders(this.userAgent),
@@ -410,13 +419,18 @@ export class XaiOAuth {
     });
     if (!response.ok) throw await responseError("xAI authorization-code exchange failed", response);
     const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-    await this.writeSession(session, profile);
+    await this.writeSession(session, profile, generation);
     return session;
   }
 
-  private async writeSession(session: OAuthSession, profile: string): Promise<void> {
+  private async writeSession(session: OAuthSession, profile: string, expectedGeneration: number): Promise<void> {
     const normalized = normalizeProfileId(profile);
-    await this.mutateSession(normalized, () => this.storeSession(session, normalized));
+    await this.mutateSession(normalized, async () => {
+      if (this.profileGeneration(normalized) !== expectedGeneration) {
+        throw new Error(`xAI sign-in for profile “${normalized}” was superseded`);
+      }
+      await this.storeSession(session, normalized);
+    });
   }
 
   private async storeSession(session: OAuthSession, profile: string): Promise<void> {
@@ -454,6 +468,20 @@ export class XaiOAuth {
     });
     this.profileIndexMutation = current;
     await current;
+  }
+
+  private profileGeneration(profile: string): number {
+    return this.profileGenerations.get(profile) ?? 0;
+  }
+
+  private beginSessionReplacement(profile: string): number {
+    const generation = this.profileGeneration(profile) + 1;
+    this.profileGenerations.set(profile, generation);
+    return generation;
+  }
+
+  private invalidateProfile(profile: string): void {
+    this.profileGenerations.set(profile, this.profileGeneration(profile) + 1);
   }
 }
 

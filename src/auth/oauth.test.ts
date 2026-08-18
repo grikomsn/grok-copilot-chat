@@ -177,7 +177,30 @@ test("does not persist a refresh that finishes after sign-out", async () => {
   const refreshing = client.getAccessToken(false, "work");
   await client.signOut("work");
   release();
-  await refreshing;
+  await assert.rejects(refreshing, /changed while its session was refreshing/);
+  assert.equal(await client.hasSession("work"), false);
+});
+
+test("does not persist a device sign-in that finishes after sign-out", async () => {
+  const store = new MemoryStore();
+  let release!: () => void;
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  const client = new XaiOAuth(store, {
+    now: () => 1_000,
+    sleep: async () => {},
+    fetch: async (input) => {
+      if (String(input).includes("/token")) {
+        await wait;
+        return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 });
+      }
+      return Response.json({});
+    },
+  });
+  const device = { device_code: "device", user_code: "code", verification_uri: "https://x.ai/device" };
+  const signingIn = client.completeDeviceSignIn(device, undefined, "work");
+  await client.signOut("work");
+  release();
+  await assert.rejects(signingIn, /was superseded/);
   assert.equal(await client.hasSession("work"), false);
 });
 
