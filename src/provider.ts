@@ -153,7 +153,15 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   ): Promise<GrokModel[]> {
     if (token.isCancellationRequested) return [];
     if (!options.configuration) return [];
-    const profile = profileFromConfiguration(options.configuration);
+    let profile: string;
+    try {
+      profile = profileFromConfiguration(options.configuration);
+    } catch (error) {
+      const message = messageOf(error);
+      this.output.appendLine(`[models] ${message}`);
+      void vscode.window.showErrorMessage(message);
+      return [];
+    }
     if (!await this.oauth.hasSession(profile)) return [];
     const maxAge = Math.max(1, this.configuration.get("catalogCacheMinutes", 5)) * 60_000;
     if (Date.now() - (this.lastModelRefreshAt.get(profile) ?? 0) > maxAge) {
