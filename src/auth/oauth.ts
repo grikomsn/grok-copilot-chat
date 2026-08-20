@@ -13,6 +13,20 @@ const OAUTH_CALLBACK_PATH = "/callback";
 const REDIRECT_URI = `http://${OAUTH_HOST}:${OAUTH_PORT}${OAUTH_CALLBACK_PATH}`;
 const OAUTH_CALLBACK_HOST = `${OAUTH_HOST}:${OAUTH_PORT}`;
 export const XAI_SESSION_SECRET = "grokCopilot.xaiOAuthSession";
+export const DEFAULT_XAI_PROFILE = "default";
+const XAI_PROFILES_SECRET = "grokCopilot.xaiOAuthProfiles.v1";
+
+export function normalizeProfileId(value: string): string {
+  const profile = value.trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(profile)) {
+    throw new Error("Profile IDs must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens");
+  }
+  return profile;
+}
+
+function sessionSecret(profile: string): string {
+  return profile === DEFAULT_XAI_PROFILE ? XAI_SESSION_SECRET : `${XAI_SESSION_SECRET}.${profile}`;
+}
 
 export interface OAuthSession {
   accessToken: string;
@@ -108,7 +122,10 @@ export class XaiOAuth {
   private readonly deviceAuthorizationUrl: string;
   private readonly tokenUrl: string;
   private readonly authorizeUrl: string;
-  private refreshPromise: Promise<OAuthSession> | undefined;
+  private readonly refreshPromises = new Map<string, { identity: string; promise: Promise<OAuthSession> }>();
+  private readonly sessionMutations = new Map<string, Promise<void>>();
+  private profileIndexMutation: Promise<void> = Promise.resolve();
+  private readonly profileGenerations = new Map<string, number>();
 
   constructor(
     private readonly store: SessionStore,
@@ -123,12 +140,13 @@ export class XaiOAuth {
     this.authorizeUrl = options.authorizeUrl ?? AUTHORIZE_URL;
   }
 
-  async hasSession(): Promise<boolean> {
-    return Boolean(await this.readSession());
+  async hasSession(profile = DEFAULT_XAI_PROFILE): Promise<boolean> {
+    return Boolean(await this.readSession(profile));
   }
 
-  async readSession(): Promise<OAuthSession | undefined> {
-    const raw = await this.store.get(XAI_SESSION_SECRET);
+  async readSession(profile = DEFAULT_XAI_PROFILE): Promise<OAuthSession | undefined> {
+    const normalized = normalizeProfileId(profile);
+    const raw = await this.store.get(sessionSecret(normalized));
     if (!raw) return undefined;
     try {
       const session = JSON.parse(raw) as Partial<OAuthSession>;
@@ -161,7 +179,9 @@ export class XaiOAuth {
     return device;
   }
 
-  async startBrowserSignIn(): Promise<BrowserSignIn> {
+  async startBrowserSignIn(profile = DEFAULT_XAI_PROFILE): Promise<BrowserSignIn> {
+    const normalized = normalizeProfileId(profile);
+    const generation = this.beginSessionReplacement(normalized);
     const pkce = await generatePkce();
     const state = randomUrlSafe(32);
     const nonce = randomUrlSafe(32);
@@ -216,7 +236,7 @@ export class XaiOAuth {
           return;
         }
         try {
-          const session = await this.exchangeAuthorizationCode(code, pkce.verifier);
+          const session = await this.exchangeAuthorizationCode(code, pkce.verifier, normalized, generation);
           settled = true;
           sendCallbackHtml(response, 200, "Signed in to xAI", "You can close this tab and return to Visual Studio Code.");
           close();
@@ -254,7 +274,13 @@ export class XaiOAuth {
     };
   }
 
-  async completeDeviceSignIn(device: DeviceCode, signal?: AbortSignal): Promise<OAuthSession> {
+  async completeDeviceSignIn(
+    device: DeviceCode,
+    signal?: AbortSignal,
+    profile = DEFAULT_XAI_PROFILE,
+  ): Promise<OAuthSession> {
+    const normalized = normalizeProfileId(profile);
+    const generation = this.beginSessionReplacement(normalized);
     const deadline = this.now() + positiveSeconds(device.expires_in, 300) * 1000;
     let interval = Math.max(positiveSeconds(device.interval, 5) * 1000, 1000);
 
@@ -273,7 +299,7 @@ export class XaiOAuth {
 
       if (response.ok) {
         const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-        await this.writeSession(session);
+        await this.writeSession(session, normalized, generation);
         return session;
       }
 
@@ -300,52 +326,87 @@ export class XaiOAuth {
     throw new Error("The xAI sign-in code expired; start sign-in again");
   }
 
-  async getSession(forceRefresh = false): Promise<OAuthSession> {
-    const session = await this.readSession();
+  async getSession(forceRefresh = false, profile = DEFAULT_XAI_PROFILE): Promise<OAuthSession> {
+    const normalized = normalizeProfileId(profile);
+    const session = await this.readSession(normalized);
     if (!session) throw new Error("Sign in to xAI before using a Grok model");
     if (!forceRefresh && session.expiresAt - this.now() > REFRESH_SKEW_MS) {
       return session;
     }
-    if (!this.refreshPromise) {
-      this.refreshPromise = this.refresh(session).finally(() => {
-        this.refreshPromise = undefined;
-      });
+    return this.refresh(session, normalized);
+  }
+
+  async getAccessToken(forceRefresh = false, profile = DEFAULT_XAI_PROFILE): Promise<string> {
+    return (await this.getSession(forceRefresh, profile)).accessToken;
+  }
+
+  async listProfiles(): Promise<string[]> {
+    const raw = await this.store.get(XAI_PROFILES_SECRET);
+    let candidates: string[] = [];
+    try {
+      const parsed = JSON.parse(raw ?? "[]") as unknown;
+      if (Array.isArray(parsed)) candidates = parsed.filter((value): value is string => typeof value === "string");
+    } catch {
+      // A corrupt profile index is rebuilt from the legacy default session.
     }
-    return this.refreshPromise;
+    candidates.push(DEFAULT_XAI_PROFILE);
+    const profiles: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const profile = normalizeProfileId(candidate);
+        if (!profiles.includes(profile) && await this.readSession(profile)) profiles.push(profile);
+      } catch {
+        // Invalid index entries are ignored.
+      }
+    }
+    return profiles.sort();
   }
 
-  async getAccessToken(forceRefresh = false): Promise<string> {
-    return (await this.getSession(forceRefresh)).accessToken;
-  }
-
-  async signOut(): Promise<void> {
-    await this.store.delete(XAI_SESSION_SECRET);
-  }
-
-  private async refresh(session: OAuthSession): Promise<OAuthSession> {
-    const response = await this.fetcher(this.tokenUrl, {
-      method: "POST",
-      headers: formHeaders(this.userAgent),
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: session.refreshToken,
-        client_id: CLIENT_ID,
-      }),
+  async signOut(profile = DEFAULT_XAI_PROFILE): Promise<void> {
+    const normalized = normalizeProfileId(profile);
+    this.invalidateProfile(normalized);
+    await this.mutateSession(normalized, async () => {
+      await this.store.delete(sessionSecret(normalized));
+      await this.mutateProfileIndex((profiles) => profiles.delete(normalized));
     });
-    if (!response.ok) {
-      throw await responseError("xAI token refresh failed; sign in again", response);
-    }
-    const refreshed = toSession(
-      (await response.json()) as TokenResponse,
-      session.refreshToken,
-      this.now(),
-      session,
-    );
-    await this.writeSession(refreshed);
-    return refreshed;
   }
 
-  private async exchangeAuthorizationCode(code: string, verifier: string): Promise<OAuthSession> {
+  private async refresh(session: OAuthSession, profile: string): Promise<OAuthSession> {
+    const identity = sessionIdentity(session);
+    const generation = this.profileGeneration(profile);
+    const existing = this.refreshPromises.get(profile);
+    if (existing?.identity === identity) return existing.promise;
+    let promise: Promise<OAuthSession>;
+    promise = (async () => {
+      const response = await this.fetcher(this.tokenUrl, {
+        method: "POST",
+        headers: formHeaders(this.userAgent),
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: session.refreshToken,
+          client_id: CLIENT_ID,
+        }),
+      });
+      if (!response.ok) throw await responseError("xAI token refresh failed; sign in again", response);
+      const refreshed = toSession((await response.json()) as TokenResponse, session.refreshToken, this.now(), session);
+      let persisted = false;
+      await this.mutateSession(profile, async () => {
+        const current = await this.readSession(profile);
+        if (this.profileGeneration(profile) === generation && current && sessionIdentity(current) === identity) {
+          await this.storeSession(refreshed, profile);
+          persisted = this.profileGeneration(profile) === generation;
+        }
+      });
+      if (!persisted) throw new Error(`xAI profile “${profile}” changed while its session was refreshing`);
+      return refreshed;
+    })().finally(() => {
+      if (this.refreshPromises.get(profile)?.promise === promise) this.refreshPromises.delete(profile);
+    });
+    this.refreshPromises.set(profile, { identity, promise });
+    return promise;
+  }
+
+  private async exchangeAuthorizationCode(code: string, verifier: string, profile: string, generation: number): Promise<OAuthSession> {
     const response = await this.fetcher(this.tokenUrl, {
       method: "POST",
       headers: formHeaders(this.userAgent),
@@ -359,13 +420,77 @@ export class XaiOAuth {
     });
     if (!response.ok) throw await responseError("xAI authorization-code exchange failed", response);
     const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-    await this.writeSession(session);
+    await this.writeSession(session, profile, generation);
     return session;
   }
 
-  private async writeSession(session: OAuthSession): Promise<void> {
-    await this.store.store(XAI_SESSION_SECRET, JSON.stringify(session));
+  private async writeSession(session: OAuthSession, profile: string, expectedGeneration: number): Promise<void> {
+    const normalized = normalizeProfileId(profile);
+    await this.mutateSession(normalized, async () => {
+      if (this.profileGeneration(normalized) !== expectedGeneration) {
+        throw new Error(`xAI sign-in for profile “${normalized}” was superseded`);
+      }
+      await this.storeSession(session, normalized);
+      if (this.profileGeneration(normalized) !== expectedGeneration) {
+        throw new Error(`xAI sign-in for profile “${normalized}” was superseded`);
+      }
+    });
   }
+
+  private async storeSession(session: OAuthSession, profile: string): Promise<void> {
+    const normalized = normalizeProfileId(profile);
+    await this.store.store(sessionSecret(normalized), JSON.stringify(session));
+    await this.mutateProfileIndex((profiles) => { profiles.add(normalized); });
+  }
+
+  private async readProfileIndex(): Promise<Set<string>> {
+    const raw = await this.store.get(XAI_PROFILES_SECRET);
+    try {
+      const parsed = JSON.parse(raw ?? "[]") as unknown;
+      return new Set(Array.isArray(parsed) ? parsed.flatMap((value) => {
+        try { return typeof value === "string" ? [normalizeProfileId(value)] : []; } catch { return []; }
+      }) : []);
+    } catch {
+      return new Set<string>();
+    }
+  }
+
+  private async mutateSession(profile: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.sessionMutations.get(profile) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.sessionMutations.set(profile, current);
+    try { await current; } finally {
+      if (this.sessionMutations.get(profile) === current) this.sessionMutations.delete(profile);
+    }
+  }
+
+  private async mutateProfileIndex(operation: (profiles: Set<string>) => void): Promise<void> {
+    const current = this.profileIndexMutation.catch(() => undefined).then(async () => {
+      const profiles = await this.readProfileIndex();
+      operation(profiles);
+      await this.store.store(XAI_PROFILES_SECRET, JSON.stringify([...profiles].sort()));
+    });
+    this.profileIndexMutation = current;
+    await current;
+  }
+
+  private profileGeneration(profile: string): number {
+    return this.profileGenerations.get(profile) ?? 0;
+  }
+
+  private beginSessionReplacement(profile: string): number {
+    const generation = this.profileGeneration(profile) + 1;
+    this.profileGenerations.set(profile, generation);
+    return generation;
+  }
+
+  private invalidateProfile(profile: string): void {
+    this.profileGenerations.set(profile, this.profileGeneration(profile) + 1);
+  }
+}
+
+function sessionIdentity(session: OAuthSession): string {
+  return `${session.accessToken}\u0000${session.refreshToken}\u0000${session.expiresAt}`;
 }
 
 export function buildAuthorizeUrl(authorizeUrl: string, challenge: string, state: string, nonce: string): string {

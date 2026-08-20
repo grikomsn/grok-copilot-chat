@@ -1,22 +1,25 @@
 import * as vscode from "vscode";
 import { messageOf } from "./errors";
-import { XaiOAuth } from "./auth/oauth";
+import { DEFAULT_XAI_PROFILE, XaiOAuth } from "./auth/oauth";
 import { GrokProvider } from "./provider";
 import { registerCommands } from "./commands";
 import type { GrokUsageSnapshot } from "./usage/domain";
 import { renderUsageStatus } from "./usage/presentation";
 
-const USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v2";
+const LEGACY_USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v2";
+const USAGE_STATE_KEY = "grokCopilot.usageSnapshots.v3";
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Grok");
   const oauth = new XaiOAuth(context.secrets, {
     userAgent: `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
   });
+  const storedUsage = context.globalState.get<Readonly<Record<string, GrokUsageSnapshot>>>(USAGE_STATE_KEY)
+    ?? { [DEFAULT_XAI_PROFILE]: context.globalState.get<GrokUsageSnapshot>(LEGACY_USAGE_STATE_KEY) ?? {} };
   const provider = new GrokProvider(
     oauth,
     output,
-    context.globalState.get<GrokUsageSnapshot>(USAGE_STATE_KEY) ?? {},
+    storedUsage,
     context.globalState,
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
@@ -28,10 +31,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     usageStatus,
-    provider.onDidChangeUsage((usage) => {
-      renderUsageStatus(usageStatus, usage);
+    provider.onDidChangeUsage(({ profile, usage }) => {
+      if (profile === provider.getActiveProfile()) renderUsageStatus(usageStatus, usage);
       updateUsageStatusVisibility(usageStatus);
-      void context.globalState.update(USAGE_STATE_KEY, usage);
+      void context.globalState.update(USAGE_STATE_KEY, provider.getUsageSnapshots());
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (
