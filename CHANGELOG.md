@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+### Minor Changes
+
+- b8f4f6e: Support multiple native xAI Grok provider entries backed by isolated named OAuth profiles, catalogs, refresh locks, and usage snapshots.
+
 ## 0.7.0
 
 ### Minor Changes
