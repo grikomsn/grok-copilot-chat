@@ -5,9 +5,11 @@ import { GrokProvider } from "./provider";
 import { registerCommands } from "./commands";
 import type { GrokUsageSnapshot } from "./usage/domain";
 import { renderUsageStatus } from "./usage/presentation";
+import { activeProfileFromState } from "./provider-profile";
 
 const LEGACY_USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v2";
 const USAGE_STATE_KEY = "grokCopilot.usageSnapshots.v3";
+const ACTIVE_PROFILE_STATE_KEY = "grokCopilot.activeProfile.v1";
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Grok");
@@ -16,11 +18,13 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const storedUsage = context.globalState.get<Readonly<Record<string, GrokUsageSnapshot>>>(USAGE_STATE_KEY)
     ?? { [DEFAULT_XAI_PROFILE]: context.globalState.get<GrokUsageSnapshot>(LEGACY_USAGE_STATE_KEY) ?? {} };
+  const activeProfile = activeProfileFromState(context.globalState.get<unknown>(ACTIVE_PROFILE_STATE_KEY));
   const provider = new GrokProvider(
     oauth,
     output,
     storedUsage,
     context.globalState,
+    activeProfile,
   );
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   usageStatus.name = "Grok usage and API activity";
@@ -31,6 +35,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     usageStatus,
+    provider.onDidChangeActiveProfile((profile) => {
+      void context.globalState.update(ACTIVE_PROFILE_STATE_KEY, profile);
+    }),
     provider.onDidChangeUsage(({ profile, usage }) => {
       if (profile === provider.getActiveProfile()) renderUsageStatus(usageStatus, usage);
       updateUsageStatusVisibility(usageStatus);
@@ -52,7 +59,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ...registerCommands(oauth, provider, output, usageStatus),
   );
   output.appendLine(`[activate] Grok for Copilot Chat ${context.extension.packageJSON.version} on VS Code ${vscode.version}`);
-  void oauth.hasSession().then((signedIn) => {
+  void oauth.hasSession(provider.getActiveProfile()).then((signedIn) => {
     if (!signedIn) return;
     updateUsageStatusVisibility(usageStatus);
     void provider.refreshUsage().catch((error) => output.appendLine(`[activity] initial refresh failed: ${messageOf(error)}`));
