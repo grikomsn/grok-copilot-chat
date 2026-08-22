@@ -20,7 +20,7 @@ import {
 } from "./models/catalog";
 import { ModelsDevMetadata, type MetadataCache } from "./models/metadata";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
-import { profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
+import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
 import {
   XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
@@ -68,12 +68,14 @@ interface PendingResponse {
 export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private readonly usageEmitter = new vscode.EventEmitter<{ profile: string; usage: GrokUsageSnapshot }>();
+  private readonly activeProfileEmitter = new vscode.EventEmitter<string>();
   readonly onDidChangeLanguageModelChatInformation = this.changeEmitter.event;
   readonly onDidChangeUsage = this.usageEmitter.event;
+  readonly onDidChangeActiveProfile = this.activeProfileEmitter.event;
   private readonly modelsByProfile = new Map<string, DiscoveredModel[]>();
   private readonly lastModelRefreshAt = new Map<string, number>();
   private readonly usageByProfile = new Map<string, GrokUsageSnapshot>();
-  private activeProfile = DEFAULT_XAI_PROFILE;
+  private activeProfile: string;
   private readonly metadata: ModelsDevMetadata;
 
   private get configuration(): vscode.WorkspaceConfiguration {
@@ -89,8 +91,10 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     private readonly output: vscode.OutputChannel,
     initialUsage: Readonly<Record<string, GrokUsageSnapshot>> = {},
     metadataCache: MetadataCache = memoryMetadataCache(),
+    initialActiveProfile: unknown = DEFAULT_XAI_PROFILE,
   ) {
     for (const [profile, usage] of Object.entries(initialUsage)) this.usageByProfile.set(profile, usage);
+    this.activeProfile = activeProfileFromState(initialActiveProfile);
     this.metadata = new ModelsDevMetadata(metadataCache);
   }
 
@@ -104,6 +108,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
 
   setActiveProfile(profile: string): void {
     this.activeProfile = normalizeProfileId(profile);
+    this.activeProfileEmitter.fire(this.activeProfile);
     this.usageEmitter.fire({ profile: this.activeProfile, usage: this.getUsageSnapshot() });
   }
 
@@ -152,7 +157,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     token: vscode.CancellationToken,
   ): Promise<GrokModel[]> {
     if (token.isCancellationRequested) return [];
-    if (!options.configuration) return [];
     let profile: string;
     try {
       profile = profileFromConfiguration(options.configuration);

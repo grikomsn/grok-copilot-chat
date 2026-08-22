@@ -14,7 +14,7 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 2. Run **Grok: Add xAI Account**, choose a profile ID such as `personal`, and authorize the extension in the browser.
 3. Open **Manage Language Models**, choose **Add Models**, select **xAI Grok**, and enter that profile ID.
 4. Repeat those steps with a different profile ID to add another xAI account. Browser sign-ins are sequential because the temporary loopback callback uses one local port.
-5. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile.
+5. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile. Leaving the profile field empty preserves the legacy `default` account.
 
 If the local callback cannot be reached, select the intended profile with **Grok: Select Active Profile** and run **Grok: Sign In to xAI with Device Code**.
 
@@ -26,7 +26,7 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 | --- | --- |
 | **Grok: Manage xAI Connection** | Test the connection, refresh models, show logs, or sign out |
 | **Grok: Add xAI Account** | Create or replace a named OAuth profile |
-| **Grok: Select Active Profile** | Choose the profile used by usage and management commands |
+| **Grok: Select Active Profile** | Choose the profile used by usage and management commands; this choice is restored after restart and does not change model-entry routing |
 | **Grok: Sign In to xAI** | Start browser/PKCE authorization |
 | **Grok: Sign In to xAI with Device Code** | Authorize without a loopback browser callback |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |

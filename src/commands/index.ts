@@ -36,7 +36,7 @@ async function manage(
   const signedIn = await oauth.hasSession(profile);
   const choices = signedIn
     ? [
-        { label: "$(account) Switch profile", action: "switch" },
+    { label: "$(account) Select profile for usage and management", action: "switch" },
         { label: "$(add) Add xAI account", action: "add" },
         { label: "$(graph) Show API activity and spend", action: "usage" },
         { label: "$(credit-card) Open Grok subscription usage", action: "openSubscriptionUsage" },
@@ -49,7 +49,7 @@ async function manage(
     : [
         { label: "$(globe) Sign in to xAI in browser", action: "signin" },
         { label: "$(key) Sign in with a device code", action: "device" },
-        { label: "$(account) Switch profile", action: "switch" },
+    { label: "$(account) Select profile for usage and management", action: "switch" },
         { label: "$(add) Add xAI account", action: "add" },
         { label: "$(output) Show Grok logs", action: "logs" },
       ];
