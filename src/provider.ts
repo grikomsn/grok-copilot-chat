@@ -157,7 +157,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     token: vscode.CancellationToken,
   ): Promise<GrokModel[]> {
     if (token.isCancellationRequested) return [];
-    if (!options.configuration) return [];
     let profile: string;
     try {
       profile = profileFromConfiguration(options.configuration);
