@@ -56,7 +56,7 @@
       },
       {
         "command": "grokCopilot.selectProfile",
-        "title": "Grok: Select Active Profile"
+        "title": "Grok: Select Profile for Usage and Management"
       },
       {
         "command": "grokCopilot.refreshModels",
