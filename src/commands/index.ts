@@ -189,11 +189,15 @@ async function selectProfile(oauth: XaiOAuth, provider: GrokProvider): Promise<v
       const session = await oauth.readSession(profile);
       return { label: profile, description: session?.email ?? "Signed in", profile };
     })),
-    { title: "Select the active xAI Grok profile" },
+    { title: "Select the xAI Grok profile for usage and management" },
   );
   if (!picked) return;
   provider.setActiveProfile(picked.profile);
-  vscode.window.showInformationMessage(`xAI Grok profile “${picked.profile}” is now active for usage and management commands.`);
+  const choose = await vscode.window.showInformationMessage(
+    `xAI Grok profile “${picked.profile}” is now active for usage and management. Chat requests keep using the account attached to the selected model entry.`,
+    "Choose Chat Model",
+  );
+  if (choose === "Choose Chat Model") await vscode.commands.executeCommand("workbench.action.chat.openModelPicker");
 }
 
 async function refreshModels(provider: GrokProvider): Promise<void> {
