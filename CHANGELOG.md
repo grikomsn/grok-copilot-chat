@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+### Patch Changes
+
+- f383a0d: Clarify that profile selection controls usage and management, and offer the VS Code chat model picker to switch the account used for inference.
+
 ## 0.8.1
 
 ### Patch Changes
