@@ -27,7 +27,7 @@ test("keeps fallback models aligned with the current xAI catalog", () => {
     { id: "grok-4.6", contextLength: 500_000, imageInput: true, toolCalling: true },
     { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
     { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
-    { id: "grok-build-0.1", contextLength: 256_000, toolCalling: true },
+    { id: "grok-build-0.1", contextLength: 256_000, imageInput: true, toolCalling: true },
     { id: "grok-4.20", contextLength: 1_000_000, toolCalling: true },
     { id: "grok-4.20-non-reasoning", contextLength: 1_000_000, toolCalling: true },
     { id: "grok-4.20-multi-agent", contextLength: 1_000_000, toolCalling: true },
@@ -84,7 +84,7 @@ test("ignores invalid context_length and non-chat entries", () => {
     { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
     { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
     { id: "grok-4.5-latest" },
-    { id: "grok-build-0.1", contextLength: 256_000, toolCalling: true },
+    { id: "grok-build-0.1", contextLength: 256_000, imageInput: true, toolCalling: true },
   ]);
 });
 
@@ -103,7 +103,7 @@ test("uses per-model fallback context lengths for partial discovery metadata", (
     { id: "grok-4.20-multi-agent", contextLength: 1_000_000, toolCalling: true },
     { id: "grok-4.3", contextLength: 1_000_000, toolCalling: true },
     { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
-    { id: "grok-build-0.1", contextLength: 256_000, toolCalling: true },
+    { id: "grok-build-0.1", contextLength: 256_000, imageInput: true, toolCalling: true },
     { id: "grok-future" },
   ]);
 });
