@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.3
+
+### Patch Changes
+
+- 6cc3efb: Recognize image input support for Grok Build 0.1 when live model discovery omits capability metadata.
+
 ## 0.8.2
 
 ### Patch Changes
