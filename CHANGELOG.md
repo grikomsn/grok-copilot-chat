@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.4
+
+### Patch Changes
+
+- 7722cb4: Recover final Responses API text and reject incomplete streamed tool arguments before they reach Copilot Chat.
+
 ## 0.8.3
 
 ### Patch Changes
