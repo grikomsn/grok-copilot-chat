@@ -37,3 +37,15 @@ test("distinguishes successful and incomplete terminal reasons", () => {
   assert.throws(() => validateStreamCompletion("length"), /output token limit/);
   assert.throws(() => validateStreamCompletion("content_filter"), /content filter/);
 });
+
+test("rejects incomplete tool arguments and normalizes complete empty arguments", () => {
+  const incomplete = new ChatCompletionStreamParser();
+  assert.throws(
+    () => incomplete.push('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"lookup","arguments":"{"}}]},"finish_reason":"tool_calls"}]}\n\n'),
+    /incomplete arguments for tool lookup/,
+  );
+
+  const empty = new ChatCompletionStreamParser();
+  const events = empty.push('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"now","arguments":""}}]},"finish_reason":"tool_calls"}]}\n\n');
+  assert.equal(events[0].toolCalls?.[0].arguments, "{}");
+});

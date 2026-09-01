@@ -1,6 +1,6 @@
 import { applyResponsesReasoningEffort, type ReasoningEffort } from "../models/options";
 import { createPromptCacheKey } from "../provider/prompt-cache";
-import type { ChatStreamEvent, PendingToolCall } from "./chat-completions";
+import { completeToolCall, type ChatStreamEvent, type PendingToolCall } from "./chat-completions";
 
 export interface ResponsesFunctionTool {
   type: "function";
@@ -87,6 +87,7 @@ export class ResponsesStreamParser {
   private readonly pendingTools = new Map<string, PendingToolCall>();
   private readonly completedToolIds = new Set<string>();
   private lastFinishReason: string | undefined;
+  private textDeltaSeen = false;
 
   get finishReason(): string | undefined {
     return this.lastFinishReason;
@@ -140,7 +141,9 @@ export class ResponsesStreamParser {
     switch (type) {
       case "response.output_text.delta":
       case "response.text.delta":
-        return typeof json.delta === "string" ? { text: json.delta } : undefined;
+        if (typeof json.delta !== "string") return undefined;
+        this.textDeltaSeen = true;
+        return { text: json.delta };
       case "response.reasoning_text.delta":
       case "response.reasoning_summary_text.delta":
         return typeof json.delta === "string" ? { reasoning: json.delta } : undefined;
@@ -169,7 +172,9 @@ export class ResponsesStreamParser {
         const usage = response && isRecord(response.usage)
           ? response.usage
           : isRecord(json.usage) ? json.usage : undefined;
+        const text = !this.textDeltaSeen && response ? responseOutputText(response) : undefined;
         return {
+          ...(text ? { text } : {}),
           ...(toolCalls.length ? { toolCalls } : {}),
           ...(usage ? { usage } : {}),
           finishReason,
@@ -229,14 +234,26 @@ export class ResponsesStreamParser {
     }
     for (const identifier of identifiers) this.completedToolIds.add(identifier);
     this.completedToolIds.add(tool.id);
-    return tool.name ? tool : undefined;
+    return tool.name ? completeToolCall(tool) : undefined;
   }
 
   private flushTools(): PendingToolCall[] {
-    const tools = [...new Set(this.pendingTools.values())].filter((tool) => tool.name);
+    const tools = [...new Set(this.pendingTools.values())].filter((tool) => tool.name).map(completeToolCall);
     this.pendingTools.clear();
     return tools;
   }
+}
+
+function responseOutputText(response: Record<string, unknown>): string | undefined {
+  const output = Array.isArray(response.output) ? response.output : [];
+  const text = output.flatMap((value) => {
+    if (!isRecord(value) || value.type !== "message" || !Array.isArray(value.content)) return [];
+    return value.content.flatMap((rawPart) => {
+      if (!isRecord(rawPart)) return [];
+      return (rawPart.type === "output_text" || rawPart.type === "text") && typeof rawPart.text === "string" ? [rawPart.text] : [];
+    });
+  }).join("");
+  return text || undefined;
 }
 
 function parseJsonRecord(data: string): Record<string, unknown> | undefined {

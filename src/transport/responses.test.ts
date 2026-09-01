@@ -117,3 +117,16 @@ test("does not expose server-side tool activity as a VS Code client tool call", 
   assert.deepEqual(events.flatMap((event) => event.toolCalls ?? []), []);
   assert.equal(events.some((event) => event.text === "answer"), true);
 });
+
+test("recovers completed response text only when text deltas are absent", () => {
+  const recovered = new ResponsesStreamParser();
+  const recoveredEvents = recovered.push('event: response.done\ndata: {"type":"response.done","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"recovered"}]}]}}\n\n');
+  assert.equal(recoveredEvents[0].text, "recovered");
+
+  const streamed = new ResponsesStreamParser();
+  const streamedEvents = streamed.push([
+    'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"answer"}',
+    'event: response.done\ndata: {"type":"response.done","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"answer"}]}]}}',
+  ].join("\n\n") + "\n\n");
+  assert.equal(streamedEvents.filter((event) => event.text).length, 1);
+});

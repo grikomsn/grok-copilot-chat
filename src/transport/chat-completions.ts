@@ -103,10 +103,20 @@ export class ChatCompletionStreamParser {
   }
 
   private flushTools(): PendingToolCall[] {
-    const tools = [...this.pendingTools.values()].filter((tool) => tool.name);
+    const tools = [...this.pendingTools.values()].filter((tool) => tool.name).map(completeToolCall);
     this.pendingTools.clear();
     return tools;
   }
+}
+
+export function completeToolCall(tool: PendingToolCall): PendingToolCall {
+  const args = tool.arguments.trim() || "{}";
+  try {
+    JSON.parse(args);
+  } catch {
+    throw new Error(`xAI response stream ended with incomplete arguments for tool ${tool.name}`);
+  }
+  return { ...tool, arguments: args };
 }
 
 export function validateStreamCompletion(finishReason: string | undefined): void {
