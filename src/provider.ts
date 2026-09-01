@@ -19,6 +19,7 @@ import {
   type DiscoveredModel,
 } from "./models/catalog";
 import { ModelsDevMetadata, type MetadataCache } from "./models/metadata";
+import { grokModelCost, modelPricingFields } from "./models/pricing";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
 import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
 import {
@@ -196,6 +197,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         maxOutputTokens: limits.maxOutputTokens,
         contextLength: limits.contextLength,
         isUserSelectable: true,
+        ...(modelPricingFields(grokModelCost(model.id, model.cost)) ?? {}),
         isBYOK: true,
         requiresAuthorization: { label: `xAI Grok (${profile})` },
         configurationSchema: buildModelConfigurationSchema(

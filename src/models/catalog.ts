@@ -1,4 +1,5 @@
 import type { ModelsDevModelMetadata } from "./metadata";
+import type { ModelCost } from "./pricing";
 
 export const DEFAULT_CONTEXT_LENGTH = 256_000;
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
@@ -10,6 +11,7 @@ export interface DiscoveredModel {
   /** Explicit capability metadata from xAI or a verified fallback profile. */
   imageInput?: boolean;
   toolCalling?: boolean;
+  cost?: ModelCost;
 }
 
 export interface ModelTokenLimits {
@@ -98,6 +100,7 @@ export function cloneDiscoveredModel(model: DiscoveredModel): DiscoveredModel {
     ...(model.contextLength === undefined ? {} : { contextLength: model.contextLength }),
     ...(model.imageInput === undefined ? {} : { imageInput: model.imageInput }),
     ...(model.toolCalling === undefined ? {} : { toolCalling: model.toolCalling }),
+    ...(model.cost === undefined ? {} : { cost: model.cost }),
   };
 }
 
@@ -108,6 +111,7 @@ export function enrichDiscoveredModel(model: DiscoveredModel, metadata: ModelsDe
     contextLength: model.contextLength ?? metadata.contextLength,
     imageInput: model.imageInput ?? metadata.imageInput,
     toolCalling: model.toolCalling ?? (metadata.toolCalling === true ? true : undefined),
+    ...(metadata.cost === undefined ? {} : { cost: metadata.cost }),
   };
 }
 
