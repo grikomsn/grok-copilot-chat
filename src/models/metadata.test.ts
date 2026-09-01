@@ -23,13 +23,16 @@ const payload = { xai: { models: { "grok-test": {
   tool_call: true,
   modalities: { input: ["text", "image"] },
   limit: { context: 500_000, output: 50_000 },
+  cost: { input: 2, cache_read: 0.3, output: 6 },
 } } } };
 
 test("normalizes the xAI models.dev provider", () => {
   const snapshot = normalizeModelsDevSnapshot(payload, 123);
   assert.equal(snapshot.models["grok-test"]?.contextLength, 500_000);
   assert.equal(snapshot.models["grok-test"]?.imageInput, true);
+  assert.deepEqual(snapshot.models["grok-test"]?.cost, { input: 2, cacheRead: 0.3, output: 6 });
   assert.equal(parseCachedModelsDevSnapshot(snapshot)?.models["grok-test"]?.toolCalling, true);
+  assert.deepEqual(parseCachedModelsDevSnapshot(snapshot)?.models["grok-test"]?.cost, { input: 2, cacheRead: 0.3, output: 6 });
   assert.equal(parseCachedModelsDevSnapshot({ fetchedAt: -1, models: {} }), undefined);
 });
 

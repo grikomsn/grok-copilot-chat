@@ -1,3 +1,5 @@
+import type { ModelCost } from "./pricing";
+
 export const MODELS_DEV_API_URL = "https://models.dev/api.json";
 export const MODELS_DEV_CACHE_KEY = "grokCopilot.modelsDevMetadata.v1";
 export const MODELS_DEV_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -14,6 +16,7 @@ export interface ModelsDevModelMetadata {
   readonly reasoning?: boolean;
   readonly releaseDate?: string;
   readonly lastUpdated?: string;
+  readonly cost?: ModelCost;
 }
 
 export interface ModelsDevSnapshot {
@@ -112,6 +115,7 @@ function normalizeModel(key: string, value: unknown): ModelsDevModelMetadata | u
   const modalities = asRecord(raw.modalities);
   const inputModalities = modalities?.input;
   const limit = asRecord(raw.limit);
+  const cost = normalizeCost(asRecord(raw.cost));
   return {
     id,
     name: optionalString(raw.name),
@@ -125,6 +129,7 @@ function normalizeModel(key: string, value: unknown): ModelsDevModelMetadata | u
     reasoning: optionalBoolean(raw.reasoning),
     releaseDate: optionalString(raw.release_date),
     lastUpdated: optionalString(raw.last_updated),
+    ...(cost ? { cost } : {}),
   };
 }
 
@@ -134,6 +139,7 @@ function parseCachedModel(key: string, value: unknown): ModelsDevModelMetadata |
   const id = stringValue(raw.id) ?? key.trim();
   if (!id || !validOptionalNumber(raw.contextLength) || !validOptionalNumber(raw.maxOutputTokens)) return undefined;
   if (!validOptionalBoolean(raw.imageInput) || !validOptionalBoolean(raw.toolCalling) || !validOptionalBoolean(raw.reasoning)) return undefined;
+  const cost = parseCost(raw.cost);
   return {
     id,
     name: optionalString(raw.name),
@@ -145,7 +151,26 @@ function parseCachedModel(key: string, value: unknown): ModelsDevModelMetadata |
     reasoning: optionalBoolean(raw.reasoning),
     releaseDate: optionalString(raw.releaseDate),
     lastUpdated: optionalString(raw.lastUpdated),
+    ...(cost ? { cost } : {}),
   };
+}
+
+function normalizeCost(raw: Record<string, unknown> | undefined): ModelCost | undefined {
+  const input = nonNegativeNumber(raw?.input);
+  const output = nonNegativeNumber(raw?.output);
+  if (input === undefined || output === undefined) return undefined;
+  const cacheRead = nonNegativeNumber(raw?.cache_read);
+  return { input, output, ...(cacheRead === undefined ? {} : { cacheRead }) };
+}
+
+function parseCost(value: unknown): ModelCost | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  const input = nonNegativeNumber(raw.input);
+  const output = nonNegativeNumber(raw.output);
+  if (input === undefined || output === undefined) return undefined;
+  const cacheRead = nonNegativeNumber(raw.cacheRead);
+  return { input, output, ...(cacheRead === undefined ? {} : { cacheRead }) };
 }
 
 function timeoutSignal(): AbortSignal | undefined { return typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS) : undefined; }
@@ -154,6 +179,7 @@ function stringValue(value: unknown): string | undefined { return typeof value =
 function optionalString(value: unknown): string | undefined { return value === undefined ? undefined : stringValue(value); }
 function optionalBoolean(value: unknown): boolean | undefined { return typeof value === "boolean" ? value : undefined; }
 function optionalTokenCount(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined; }
+function nonNegativeNumber(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined; }
 function stringArray(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 function validTimestamp(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value >= 0; }
 function validOptionalNumber(value: unknown): boolean { return value === undefined || optionalTokenCount(value) !== undefined; }
