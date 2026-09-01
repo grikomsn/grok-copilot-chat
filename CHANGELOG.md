@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.5
+
+### Patch Changes
+
+- f70f0d0: Register model-specific xAI token pricing and relative cost tiers with VS Code.
+
 ## 0.8.4
 
 ### Patch Changes
