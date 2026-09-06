@@ -38,6 +38,7 @@ Composer controls override workspace defaults; reasoning defaults to High when s
 ## Documentation
 
 - [Setup, commands, settings, and troubleshooting](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/setup.md)
+- [Models and pricing](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/models.md)
 - [OAuth and security](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/security.md)
 - [Development and releases](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/development.md)
 

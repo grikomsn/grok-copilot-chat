@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { messageOf } from "./errors";
 import { DEFAULT_XAI_PROFILE, XaiOAuth } from "./auth/oauth";
 import { GrokProvider } from "./provider";
-import { registerCommands } from "./commands";
+import { registerCommands } from "./commands/commands";
 import type { GrokUsageSnapshot } from "./usage/domain";
 import { renderUsageStatus } from "./usage/presentation";
 import { activeProfileFromState } from "./provider-profile";
