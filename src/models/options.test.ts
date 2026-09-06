@@ -4,7 +4,10 @@ import {
   applyReasoningEffort,
   applyResponsesReasoningEffort,
   buildModelConfigurationSchema,
+  contextSizeOptions,
   modelEffortSpec,
+  resolveContextCap,
+  resolveContextSize,
   resolveReasoningEffort,
   resolveWebSearch,
 } from "./options";
@@ -81,4 +84,35 @@ test("configuration schema exposes a native picker with the workspace default", 
   const frontier = buildModelConfigurationSchema("grok-4.6", "xhigh", true);
   assert.deepEqual(frontier?.properties.reasoningEffort.enum, ["low", "medium", "high", "xhigh"]);
   assert.equal(frontier?.properties.webSearch.default, "on");
+});
+
+test("offers context tiers below the registered input limit", () => {
+  assert.deepEqual(contextSizeOptions(1_000_000)?.map((option) => option.value), [0, 65_536, 131_072, 200_000, 1_000_000]);
+  assert.deepEqual(contextSizeOptions(1_000_000)?.map((option) => option.label), ["Auto", "64K", "128K", "200K", "Maximum"]);
+  assert.equal(contextSizeOptions(65_536), undefined);
+  assert.equal(contextSizeOptions(32_000), undefined);
+});
+
+test("resolves the effective context cap from the selected tier", () => {
+  assert.equal(resolveContextCap(131_072, 1_000_000), 131_072);
+  assert.equal(resolveContextCap(1_500_000, 1_000_000), undefined);
+  assert.equal(resolveContextCap(0, 1_000_000), undefined);
+  assert.equal(resolveContextCap(-5, 1_000_000), undefined);
+  assert.equal(resolveContextCap(65_536, 65_536), undefined);
+});
+
+test("reads the context size from request configuration", () => {
+  assert.equal(resolveContextSize({ contextSize: 131_072 }), 131_072);
+  assert.equal(resolveContextSize({ contextSize: 0 }), 0);
+  assert.equal(resolveContextSize({ contextSize: "131072" }), 0);
+  assert.equal(resolveContextSize(undefined), 0);
+});
+
+test("exposes the Context Window control alongside reasoning controls", () => {
+  const schema = buildModelConfigurationSchema("grok-4.6", "high", false, contextSizeOptions(491_520));
+  assert.deepEqual(schema?.properties.contextSize.enum, [0, 65_536, 131_072, 200_000, 491_520]);
+  assert.equal(schema?.properties.contextSize.default, 0);
+  assert.equal(schema?.properties.contextSize.group, "navigation");
+  const plain = buildModelConfigurationSchema("grok-4.6", "high", false);
+  assert.equal("contextSize" in (plain?.properties ?? {}), false);
 });
