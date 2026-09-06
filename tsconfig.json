@@ -1,16 +1,17 @@
 {
   "compilerOptions": {
+    "target": "ES2023",
     "module": "Node16",
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "moduleResolution": "Node16",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vscode"],
     "outDir": "out",
     "rootDir": "src",
-    "sourceMap": true,
     "strict": true,
-    "moduleResolution": "Node16",
+    "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "forceConsistentCasingInFileNames": true
   },
-  "exclude": ["node_modules", ".vscode-test"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts"]
 }
