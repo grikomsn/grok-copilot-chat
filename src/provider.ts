@@ -3,6 +3,9 @@ import { messageOf } from "./errors";
 import {
   applyReasoningEffort,
   buildModelConfigurationSchema,
+  contextSizeOptions,
+  resolveContextCap,
+  resolveContextSize,
   resolveReasoningEffort,
   resolveWebSearch,
   type ReasoningEffort,
@@ -41,6 +44,7 @@ import {
   normalizeChatMessages,
   normalizeResponsesInput,
 } from "./provider/messages";
+import { trimChatHistoryToFit, trimResponsesInputToFit } from "./provider/history-trim";
 import { reportStreamEvent } from "./provider/response";
 import { createChatPromptCacheHeaders } from "./provider/prompt-cache";
 import { buildChatFunctionTool, toolMode } from "./tools/client-tools";
@@ -204,6 +208,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
           model.id,
           defaultEffort,
           this.configuration.get("webSearch", false),
+          contextSizeOptions(limits.maxInputTokens),
         ),
         capabilities: {
           ...(model.imageInput === undefined ? {} : { imageInput: model.imageInput }),
@@ -233,10 +238,16 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       model.contextLength,
       this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS),
     ).maxOutputTokens;
+    const contextCap = resolveContextCap(
+      resolveContextSize(options.modelConfiguration),
+      resolveModelTokenLimits(model.contextLength, this.configuration.get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS)).maxInputTokens,
+    );
     const requestBody = webSearch
       ? buildResponsesRequest(
         model.rawModelId,
-        normalizeResponsesInput(messages.flatMap(convertResponsesMessage)),
+        normalizeResponsesInput(contextCap === undefined
+          ? messages.flatMap(convertResponsesMessage)
+          : [...trimResponsesInputToFit(messages.flatMap(convertResponsesMessage), contextCap).items]),
         [
           XAI_WEB_SEARCH_TOOL,
           ...(options.tools ?? []).map(buildResponsesFunctionTool),
@@ -245,7 +256,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         maxOutputTokens,
         toolMode(options.toolMode),
       )
-      : buildRequest(model.rawModelId, messages, options, reasoningEffort, maxOutputTokens);
+      : buildRequest(model.rawModelId, messages, options, reasoningEffort, maxOutputTokens, contextCap);
     let session = await this.oauth.getSession(false, model.profile);
     let pending = await this.sendRequest(session, requestBody, token, webSearch ? "responses" : "chat/completions");
     if (pending.response.status === 401) {
@@ -511,15 +522,20 @@ function buildRequest(
   options: vscode.ProvideLanguageModelChatResponseOptions,
   reasoningEffort?: ReasoningEffort,
   maxOutputTokens?: number,
+  contextCapTokens?: number,
 ): Record<string, unknown> {
   const configuredMaxOutput = grokConfiguration().get("maxOutputTokens", DEFAULT_MAX_OUTPUT_TOKENS);
   const maxTokens = typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
     ? Math.floor(maxOutputTokens)
     : configuredMaxOutput;
+  const converted = normalizeChatMessages(messages.flatMap(convertChatMessage));
+  const requestMessages = contextCapTokens === undefined
+    ? converted
+    : [...trimChatHistoryToFit(converted, contextCapTokens).items];
   const tools = (options.tools ?? []).map(buildChatFunctionTool);
   return applyReasoningEffort({
     model,
-    messages: normalizeChatMessages(messages.flatMap(convertChatMessage)),
+    messages: requestMessages,
     stream: true,
     stream_options: { include_usage: true },
     max_tokens: maxTokens,

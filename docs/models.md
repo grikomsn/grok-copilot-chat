@@ -37,3 +37,31 @@ The model picker displays each model's input, cached-input, and output pricing.
 Pricing discovered through the models.dev enrichment is preferred; when it is
 missing, the extension falls back to the official rates captured in
 `src/models/pricing.ts`.
+
+## Context window size
+
+Each model entry exposes a Context Window control in the Copilot Chat model
+picker (`src/models/options.ts`). The options are Auto (the default), fixed
+64K, 128K, and 200K tiers that fit below the model's registered input limit
+(context minus the configured maximum output), and Maximum. Auto and Maximum
+keep the default behavior.
+
+A specific tier acts as a local upper limit: the selection is stored per model
+by VS Code, never exceeds the model's registered input limit, and when the
+converted request exceeds the selected tier the oldest conversation turns are
+trimmed before the request is built (`src/provider/history-trim.ts`), in both
+the Chat Completions and Responses dialects. The first turn, the current turn,
+and tool-call adjacency are always preserved, and models without a fitting
+tier keep their picker unchanged.
+
+### Context indicator compatibility
+
+Auto uses the model's registered input budget. The context indicator shows that
+input budget plus the response reserve; a numeric context tier replaces only
+the input budget. Auto is stored as `"auto"`, because VS Code interprets numeric
+zero as a zero-token input window. If an existing chat still shows only the
+output limit after upgrading, select Auto again in its Context Window control
+to replace a saved zero selection.
+
+Context Window uses the dedicated tokens group so it remains visible beside
+reasoning controls. VS Code renders only one enum property per group.
