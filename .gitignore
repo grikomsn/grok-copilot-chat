@@ -1,8 +1,12 @@
 node_modules/
+.vscode-test/
 out/
 *.vsix
 .DS_Store
+*.log
 coverage/
 .env
 .env.*
 !.env.example
+tmp/
+assets/Grok*

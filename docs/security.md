@@ -1,4 +1,4 @@
-# OAuth and security
+# Security
 
 ## Credential storage
 
@@ -26,5 +26,7 @@ The subscription usage refresh reads the OAuth-backed Grok client billing surfac
 ## Logging
 
 Debug logging is disabled by default. When enabled, the Grok output channel records request and stream metadata, model discovery, and errors; it does not intentionally log prompts or OAuth tokens.
+
+## Reporting vulnerabilities
 
 Report vulnerabilities according to the [security policy](https://github.com/grikomsn/grok-copilot-chat/security/policy) or email [security@nibras.co](mailto:security@nibras.co). Do not disclose credentials, sensitive prompts, or vulnerability details in a public issue.
