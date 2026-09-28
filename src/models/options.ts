@@ -26,6 +26,7 @@ export function modelEffortSpec(modelId: string): ModelEffortSpec | undefined {
   if (id.includes("grok-4.20-multi-agent")) {
     return { efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "high" };
   }
+  if (id.includes("grok-4.7")) return FRONTIER_REASONING;
   if (id.includes("grok-4.6")) return FRONTIER_REASONING;
   if (id.includes("grok-4.5")) return STANDARD_REASONING;
   if (id.includes("grok-4.3")) return OPTIONAL_REASONING;

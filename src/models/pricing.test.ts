@@ -21,7 +21,11 @@ test("converts USD per-million rates to VS Code pricing fields", () => {
 });
 
 test("uses official rates for xAI aliases missing from models.dev", () => {
+  assert.deepEqual(grokModelCost("grok-4.7"), { input: 2, cacheRead: 0.5, output: 6 });
   assert.deepEqual(grokModelCost("grok-4.20-multi-agent"), { input: 1.25, cacheRead: 0.2, output: 2.5 });
+  assert.deepEqual(grokModelCost("grok-4.20-0309-reasoning"), { input: 1.25, cacheRead: 0.2, output: 2.5 });
+  assert.deepEqual(grokModelCost("grok-4.20-0309-non-reasoning"), { input: 1.25, cacheRead: 0.2, output: 2.5 });
+  assert.deepEqual(grokModelCost("grok-4.20-multi-agent-0309"), { input: 1.25, cacheRead: 0.2, output: 2.5 });
   assert.equal(grokModelCost("future-model"), undefined);
 });
 
