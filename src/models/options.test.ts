@@ -13,6 +13,10 @@ import {
 } from "./options";
 
 test("exposes model-specific Grok reasoning levels", () => {
+  assert.deepEqual(modelEffortSpec("grok-4.7"), {
+    efforts: ["low", "medium", "high", "xhigh"],
+    defaultEffort: "high",
+  });
   assert.deepEqual(modelEffortSpec("grok-4.6"), {
     efforts: ["low", "medium", "high", "xhigh"],
     defaultEffort: "high",

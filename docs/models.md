@@ -18,6 +18,7 @@ The bundled fallback list:
 
 | Model | Context | Images | Tools |
 | --- | ---: | :---: | :---: |
+| grok-4.7 | 500K | Yes | Yes |
 | grok-4.6 | 500K | Yes | Yes |
 | grok-4.5 | 500K | Yes | Yes |
 | grok-4.3 | 1M | Yes | Yes |

@@ -21,6 +21,7 @@ export interface ModelTokenLimits {
 }
 
 export const FALLBACK_MODELS: readonly DiscoveredModel[] = [
+  { id: "grok-4.7", contextLength: 500_000, imageInput: true, toolCalling: true },
   { id: "grok-4.6", contextLength: 500_000, imageInput: true, toolCalling: true },
   { id: "grok-4.5", contextLength: 500_000, imageInput: true, toolCalling: true },
   { id: "grok-4.3", contextLength: 1_000_000, imageInput: true, toolCalling: true },
