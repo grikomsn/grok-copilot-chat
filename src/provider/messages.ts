@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { joinTextParts, stringifyWellFormedJson } from "../transport/unicode";
 import type { ResponsesInputContentPart, ResponsesInputItem } from "../transport/responses";
 
 export interface ChatMessage {
@@ -33,10 +34,10 @@ export function convertChatMessage(message: vscode.LanguageModelChatRequestMessa
       toolCalls.push({
         id: part.callId,
         type: "function",
-        function: { name: part.name, arguments: JSON.stringify(part.input ?? {}) },
+        function: { name: part.name, arguments: stringifyWellFormedJson(part.input ?? {}) },
       });
     } else if (part instanceof vscode.LanguageModelToolResultPart) {
-      results.push({ role: "tool", tool_call_id: part.callId, content: part.content.map(inputPartText).join("\n") });
+      results.push({ role: "tool", tool_call_id: part.callId, content: joinTextParts(part.content.map(inputPartText)) });
     } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith("image/")) {
       images.push({
         type: "image_url",
@@ -45,7 +46,7 @@ export function convertChatMessage(message: vscode.LanguageModelChatRequestMessa
     }
   }
 
-  const textValue = text.join("\n");
+  const textValue = joinTextParts(text);
   const content: string | ChatContentPart[] = images.length
     ? [...(textValue ? [{ type: "text" as const, text: textValue }] : []), ...images]
     : textValue;
@@ -70,13 +71,13 @@ export function convertResponsesMessage(message: vscode.LanguageModelChatRequest
         type: "function_call",
         call_id: part.callId,
         name: part.name,
-        arguments: JSON.stringify(part.input ?? {}),
+        arguments: stringifyWellFormedJson(part.input ?? {}),
       });
     } else if (part instanceof vscode.LanguageModelToolResultPart) {
       results.push({
         type: "function_call_output",
         call_id: part.callId,
-        output: part.content.map(inputPartText).join("\n"),
+        output: joinTextParts(part.content.map(inputPartText)),
       });
     } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith("image/")) {
       images.push({
@@ -86,7 +87,7 @@ export function convertResponsesMessage(message: vscode.LanguageModelChatRequest
     }
   }
 
-  const textValue = text.join("\n");
+  const textValue = joinTextParts(text);
   const content: string | readonly ResponsesInputContentPart[] = images.length
     ? [...(textValue ? [{ type: "input_text" as const, text: textValue }] : []), ...images]
     : textValue;
@@ -112,13 +113,13 @@ export function normalizeResponsesInput(input: ResponsesInputItem[]): ResponsesI
 }
 
 export function messageToText(message: vscode.LanguageModelChatRequestMessage): string {
-  return message.content.map(inputPartText).join("\n");
+  return joinTextParts(message.content.map(inputPartText));
 }
 
 function inputPartText(part: vscode.LanguageModelInputPart | unknown): string {
   if (part instanceof vscode.LanguageModelTextPart) return part.value;
-  if (part instanceof vscode.LanguageModelToolCallPart) return JSON.stringify(part.input ?? {});
-  if (part instanceof vscode.LanguageModelToolResultPart) return part.content.map(inputPartText).join("\n");
+  if (part instanceof vscode.LanguageModelToolCallPart) return stringifyWellFormedJson(part.input ?? {});
+  if (part instanceof vscode.LanguageModelToolResultPart) return joinTextParts(part.content.map(inputPartText));
   if (typeof part === "string") return part;
   return "";
 }

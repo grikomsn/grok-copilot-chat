@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { stringifyWellFormedJson } from "./transport/unicode";
 import { messageOf } from "./errors";
 import {
   applyReasoningEffort,
@@ -461,7 +462,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
           }),
           ...(endpoint === "chat/completions" ? createChatPromptCacheHeaders(requestBody) : {}),
         },
-        body: JSON.stringify(requestBody),
+        body: stringifyWellFormedJson(requestBody),
         signal: controller.signal,
       });
       return { response, cleanup };
