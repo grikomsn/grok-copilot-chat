@@ -1,7 +1,9 @@
 export const XAI_OAUTH_API_BASE = "https://cli-chat-proxy.grok.com/v1";
 export const XAI_OAUTH_TOKEN_AUTH = "xai-grok-cli";
 export const XAI_GROK_CLIENT_IDENTIFIER = "grok-shell";
-export const XAI_GROK_CLIENT_VERSION = "1.0.3";
+// Proxy compatibility baseline from https://x.ai/cli/stable (2026-10-02).
+// The proxy rejects inference below 1.0.13 with HTTP 426, even when models load.
+export const XAI_GROK_CLIENT_VERSION = "1.0.46";
 export const XAI_GROK_CLIENT_MODE = "interactive";
 export const XAI_AUTHENTICATE_RESPONSE = "authenticate-response";
 export const XAI_SUBSCRIPTION_BILLING_PATH = "/billing?format=credits";

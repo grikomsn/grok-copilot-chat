@@ -61,5 +61,7 @@ Prompts and OAuth tokens are not written to the output channel.
 - **No Grok models in the picker:** sign in with **Grok: Add xAI Account**, then add an xAI Grok entry with the same profile ID in **Manage Language Models**.
 - **Browser sign-in cannot complete:** cancel it and use the device-code command.
 - **Authentication or API errors:** open **Grok: Manage xAI Connection**, test the connection, and inspect the Grok output channel.
+- **HTTP 426 asking you to update Grok CLI:** update this extension and reload VS Code. The extension sends its own proxy compatibility header; installing or updating a separate Grok CLI does not change it. Model discovery can still work while inference is rejected.
+- **HTTP 400 mentioning a lone surrogate:** update this extension and retry the conversation. Text-part boundaries preserve split emoji, and unrecoverable UTF-16 surrogates are replaced with `�` before requests are encoded.
 - **Context window stays at 0%:** start a new chat after updating the extension. Completed Grok responses report exact input/output usage to VS Code; old sessions do not gain usage retroactively.
 - **Need a diagnostic snapshot:** run **Grok: Show Diagnostics** and include the generated report when filing an issue. Remove any information you do not want to share.

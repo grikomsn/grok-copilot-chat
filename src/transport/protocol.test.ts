@@ -42,3 +42,11 @@ test("does not create empty identity headers for older OAuth sessions", () => {
   assert.equal(headers["x-email"], undefined);
   assert.equal(headers.Authorization, "Bearer secret");
 });
+
+test("advertises a proxy compatibility version above the known inference floor", () => {
+  const version = XAI_GROK_CLIENT_VERSION.split(".").map(Number);
+  assert.ok(version[0] > 1 || (version[0] === 1 && (version[1] > 0 || version[2] >= 13)));
+  const headers = buildXaiOAuthHeaders({ accessToken: "fake", userAgent: "grok-copilot-chat/0.9.2" });
+  assert.equal(headers["x-grok-client-version"], XAI_GROK_CLIENT_VERSION);
+  assert.equal(headers["User-Agent"], "grok-copilot-chat/0.9.2");
+});
