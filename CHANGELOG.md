@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0
+
+### Major Changes
+
+- cbfa102: Isolate parallel streamed calls and reasoning segments, discover OAuth accounts from stored sessions, and reconcile observed entries. Model IDs now always include the profile; reselect default-profile models after upgrading. Remove singleton usage migration.
+
 ## 0.9.2
 
 ### Patch Changes
