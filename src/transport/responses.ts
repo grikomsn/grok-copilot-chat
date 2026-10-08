@@ -86,6 +86,7 @@ export class ResponsesStreamParser {
   private buffer = "";
   private readonly pendingTools = new Set<PendingToolCall>();
   private readonly toolAliases = new Map<string, PendingToolCall>();
+  private readonly canonicalTools = new WeakSet<PendingToolCall>();
   private readonly completedToolIds = new Set<string>();
   private lastFinishReason: string | undefined;
   private textDeltaSeen = false;
@@ -207,17 +208,20 @@ export class ResponsesStreamParser {
     if (typeof value.delta === "string") tool.arguments += value.delta;
   }
 
-  private completeFunctionCall(value: Record<string, unknown>): PendingToolCall | undefined {
+  private completeFunctionCall(value: Record<string, unknown>, itemDone = false): PendingToolCall | undefined {
     const tool = this.findOrCreateTool(value);
     if (!tool) return undefined;
     if (typeof value.name === "string") tool.name = value.name;
     if (typeof value.arguments === "string") tool.arguments = value.arguments;
+    // An arguments-done may precede the item that supplies the call_id.
+    // Waiting prevents a numeric output index or item ID entering tool history.
+    if (!itemDone && !this.canonicalTools.has(tool)) return undefined;
     return this.removeTool(tool, false);
   }
 
   private completeOutputItem(value: unknown, event: Record<string, unknown>): PendingToolCall | undefined {
     if (!isRecord(value) || value.type !== "function_call") return undefined;
-    return this.completeFunctionCall({ ...event, ...value });
+    return this.completeFunctionCall({ ...event, ...value }, true);
   }
 
   private findOrCreateTool(value: Record<string, unknown>): PendingToolCall | undefined {
@@ -228,7 +232,10 @@ export class ResponsesStreamParser {
     }
     const tool = identifiers.map((identifier) => this.toolAliases.get(identifier)).find(Boolean)
       ?? { id: "", name: "", arguments: "" };
-    if (typeof value.call_id === "string" && value.call_id) tool.id = value.call_id;
+    if (typeof value.call_id === "string" && value.call_id) {
+      tool.id = value.call_id;
+      this.canonicalTools.add(tool);
+    }
     else if (!tool.id) {
       const itemId = value.item_id ?? value.id;
       if (typeof itemId === "string") tool.id = itemId;

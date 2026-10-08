@@ -3,7 +3,7 @@
 ## Local workflow
 
 ```bash
-npm install
+npm ci
 npm test
 npm run package
 ```
@@ -15,6 +15,18 @@ Install the local build with:
 ```bash
 code --install-extension grok-copilot-chat-<version>.vsix --force
 ```
+
+The native fixture in `test/native/index.js` exports `run` for VS Code's extension test host. After compilation, run it with an isolated user-data directory:
+
+```bash
+code --new-window --user-data-dir /tmp/grok-native-probe \
+  --extensions-dir /tmp/grok-native-probe/extensions \
+  --extensionDevelopmentPath "$PWD" \
+  --extensionTestsPath "$PWD/test/native/index.js" \
+  --disable-extensions --disable-workspace-trust
+```
+
+It uses real VS Code response constructors with synthetic OAuth sessions and injected HTTP responses. It verifies both stream dialects, parallel calls, a follow-up turn, reasoning closure, cancellation, incomplete EOF, one 401 refresh, profile isolation, and account reconciliation. It performs no live authentication or paid inference and prints counts and pass status only.
 
 ## Release workflow
 

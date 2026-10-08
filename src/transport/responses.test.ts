@@ -198,3 +198,10 @@ test("recognizes standalone incomplete terminal events", () => {
   parser.push(responseFrame("response.incomplete", { response: { status: "incomplete" } }));
   assert.equal(parser.finishReason, "length");
 });
+
+test("waits for a canonical call ID when indexed arguments finish before the item", () => {
+  const parser = new ResponsesStreamParser();
+  assert.deepEqual(parser.push(responseFrame("response.function_call_arguments.done", { output_index: 0, name: "read", arguments: "{}" })), []);
+  const events = parser.push(responseFrame("response.output_item.done", { output_index: 0, item: { type: "function_call", id: "item", call_id: "canonical", name: "read" } }));
+  assert.deepEqual(events.flatMap((event) => event.toolCalls ?? []), [{ id: "canonical", name: "read", arguments: "{}" }]);
+});
