@@ -14,9 +14,9 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 2. Run **Grok: Add xAI Account**, choose a profile ID such as `personal`, and authorize the extension in the browser.
 3. Open **Manage Language Models**, choose **Add Models**, select **xAI Grok**, and enter that profile ID.
 4. Repeat those steps with a different profile ID to add another xAI account. Browser sign-ins are sequential because the temporary loopback callback uses one local port.
-5. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile. Leaving the profile field empty preserves the legacy `default` account.
+5. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile. The profile field defaults to `default`. Every model ID is qualified by its profile, including `default`. After upgrading from 0.x, reselect your Grok model in a new chat; unqualified model IDs and old singleton usage snapshots are no longer supported.
 
-If the local callback cannot be reached, select the intended profile with **Grok: Select Active Profile** and run **Grok: Sign In to xAI with Device Code**.
+If the local callback cannot be reached, select the intended profile with **Grok: Select Profile for Usage and Management** and run **Grok: Sign In to xAI with Device Code**.
 
 Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker and default to High. Models also expose a **Web Search** toggle; it is off by default, routes enabled requests through xAI's Responses API, and overrides the `grokCopilot.webSearch` workspace default for that request. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a reasoning picker because their legacy contracts do not accept the current reasoning parameter.
 
@@ -24,9 +24,9 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 
 | Command | Purpose |
 | --- | --- |
-| **Grok: Manage xAI Connection** | Test the connection, refresh models, show logs, or sign out |
+| **Grok: Manage xAI Connection** | Test the connection, refresh models, reconcile accounts and observed entries, show logs, or sign out |
 | **Grok: Add xAI Account** | Create or replace a named OAuth profile |
-| **Grok: Select Active Profile** | Choose the profile used by usage and management commands; this choice is restored after restart and does not change model-entry routing |
+| **Grok: Select Profile for Usage and Management** | Choose the profile used by usage and management commands; this choice is restored after restart and does not change model-entry routing |
 | **Grok: Sign In to xAI** | Start browser/PKCE authorization |
 | **Grok: Sign In to xAI with Device Code** | Authorize without a loopback browser callback |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |
@@ -36,7 +36,9 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 | **Grok: Open xAI Console Usage** | Open account-wide xAI API usage and prepaid credits |
 | **Grok: Show Diagnostics** | Show the VS Code version, session state, and registered models |
 
-After sign-in, the extension refreshes the read-only Grok subscription snapshot when the account exposes it. The status bar and popup can show the current weekly usage percentage, the scheduled reset date, Extra Usage Credits, and auto top-up status. After an API call, the same popup also shows exact billed spend accumulated by this extension on this device. Last-known totals and account snapshots persist across VS Code reloads and are cleared on sign-out.
+Account lists come directly from valid OAuth sessions in VS Code SecretStorage. In **Grok: Manage xAI Connection**, choose **Reconcile accounts and observed entries** to see signed-in profiles that discovery has not observed and previously observed profiles whose sessions are gone. Observations contain profile IDs, model counts, and timestamps; they are discovery history rather than the current inventory of native VS Code entries. Add or remove entries in **Manage Language Models**.
+
+After sign-in, the extension refreshes the read-only Grok subscription snapshot when the account exposes it. The status bar and popup can show the current weekly usage percentage, the scheduled reset date, Extra Usage Credits, and auto top-up status. After an API call, the same popup also shows exact billed spend accumulated by this extension on this device. Last-known totals and account snapshots persist across VS Code reloads and are cleared on sign-out or a new sign-in so replacing an account cannot inherit the previous account's usage.
 
 The request and token values returned in xAI response headers are transient throughput capacity (requests per second and tokens per minute). They can return to their full value quickly and are not subscription usage or prepaid balance. Subscription usage is read-only; use **Grok: Open Subscription Usage** to change billing or purchase credits. Account-wide API usage and prepaid API credits remain available in the xAI Console.
 
@@ -55,6 +57,8 @@ The request and token values returned in xAI response headers are transient thro
 The authenticated xAI `/models` response remains authoritative. Fields it omits are enriched from the canonical `xai` provider in a six-hour models.dev snapshot stored in VS Code `globalState`. Stale metadata is returned immediately while refresh runs and remains available during models.dev outages.
 
 Prompts and OAuth tokens are not written to the output channel.
+
+Streaming keeps each parallel function call pending until its arguments are complete, accepts indexed or ID-only fragments, and closes reasoning before visible answers or tool calls. Cancellation and timeout control stay active through response-body consumption; unfinished streams report an error.
 
 ## Troubleshooting
 

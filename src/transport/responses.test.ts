@@ -130,3 +130,71 @@ test("recovers completed response text only when text deltas are absent", () => 
   ].join("\n\n") + "\n\n");
   assert.equal(streamedEvents.filter((event) => event.text).length, 1);
 });
+
+function responseFrame(type: string, value: Record<string, unknown>): string {
+  return `event: ${type}\r\ndata: ${JSON.stringify({ type, ...value })}\r\n\r\n`;
+}
+
+test("joins numeric output indices to item and canonical call IDs", () => {
+  const parser = new ResponsesStreamParser();
+  const events = [
+    responseFrame("response.function_call_arguments.delta", { output_index: 0, delta: '{"path":' }),
+    responseFrame("response.output_item.added", { output_index: 0, item: { id: "item", call_id: "call", type: "function_call", name: "read" } }),
+    responseFrame("response.function_call_arguments.delta", { item_id: "item", delta: '"one"}' }),
+    responseFrame("response.output_item.done", { output_index: 0, item: { id: "item", call_id: "call", type: "function_call", name: "read" } }),
+    responseFrame("response.function_call_arguments.done", { output_index: 0, name: "read", arguments: '{"path":"one"}' }),
+    responseFrame("response.done", { response: { status: "completed" } }),
+  ].flatMap((frame) => parser.push(frame));
+  assert.deepEqual(events.flatMap((event) => event.toolCalls ?? []), [{ id: "call", name: "read", arguments: '{"path":"one"}' }]);
+});
+
+test("an unnamed arguments-done waits for its owning item and leaves siblings pending", () => {
+  const parser = new ResponsesStreamParser();
+  const events = [
+    responseFrame("response.function_call_arguments.delta", { output_index: 0, delta: '{"a":1}' }),
+    responseFrame("response.function_call_arguments.delta", { output_index: 1, delta: '{"b":' }),
+    responseFrame("response.function_call_arguments.done", { output_index: 0, arguments: '{"a":1}' }),
+    responseFrame("response.output_item.done", { output_index: 0, item: { id: "item-a", call_id: "call-a", type: "function_call", name: "first" } }),
+    responseFrame("response.output_item.added", { output_index: 1, item: { id: "item-b", call_id: "call-b", type: "function_call", name: "second" } }),
+    responseFrame("response.function_call_arguments.delta", { item_id: "item-b", delta: '2}' }),
+    responseFrame("response.output_item.done", { output_index: 1, item: { id: "item-b", call_id: "call-b", type: "function_call", name: "second" } }),
+  ].flatMap((frame) => parser.push(frame));
+  assert.deepEqual(events.flatMap((event) => event.toolCalls ?? []), [
+    { id: "call-a", name: "first", arguments: '{"a":1}' },
+    { id: "call-b", name: "second", arguments: '{"b":2}' },
+  ]);
+  assert.deepEqual(parser.finish(), []);
+});
+
+test("keeps incomplete per-call completion pending and rejects truncated EOF", () => {
+  const parser = new ResponsesStreamParser();
+  assert.deepEqual(parser.push(responseFrame("response.function_call_arguments.done", { output_index: 0, name: "read", arguments: "{" })), []);
+  assert.throws(() => parser.finish(), /incomplete arguments/);
+});
+
+test("recovers completed snapshot calls once and ignores late arguments-done duplicates", () => {
+  const parser = new ResponsesStreamParser();
+  const item = { id: "item", call_id: "call", type: "function_call", name: "read", arguments: "{}" };
+  const events = [
+    responseFrame("response.done", { response: { status: "completed", output: [item] } }),
+    responseFrame("response.function_call_arguments.done", { item_id: "item", call_id: "call", name: "read", arguments: "{}" }),
+    responseFrame("response.output_item.done", { item }),
+  ].flatMap((frame) => parser.push(frame));
+  assert.equal(events.flatMap((event) => event.toolCalls ?? []).length, 1);
+});
+
+test("reassembles CRLF split inside event names and terminal delimiters", () => {
+  const frame = responseFrame("response.output_text.delta", { delta: "answer" });
+  for (let position = 1; position < frame.length; position++) {
+    const parser = new ResponsesStreamParser();
+    const events = [...parser.push(frame.slice(0, position)), ...parser.push(frame.slice(position)), ...parser.finish()];
+    assert.equal(events.length, 1);
+    assert.equal(events[0].text, "answer");
+  }
+});
+
+test("recognizes standalone incomplete terminal events", () => {
+  const parser = new ResponsesStreamParser();
+  parser.push(responseFrame("response.incomplete", { response: { status: "incomplete" } }));
+  assert.equal(parser.finishReason, "length");
+});

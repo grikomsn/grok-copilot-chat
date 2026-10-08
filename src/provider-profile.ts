@@ -11,7 +11,7 @@ export function profileFromConfiguration(configuration: Readonly<Record<string, 
 
 export function profileQualifiedModelId(profile: string, modelId: string): string {
   const normalized = normalizeProfileId(profile);
-  return normalized === DEFAULT_XAI_PROFILE ? modelId : `${normalized}::${modelId}`;
+  return `${normalized}::${modelId}`;
 }
 
 /** Restores a command-management profile without allowing malformed state to prevent activation. */

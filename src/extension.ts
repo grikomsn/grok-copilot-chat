@@ -1,13 +1,12 @@
 import * as vscode from "vscode";
 import { messageOf } from "./errors";
-import { DEFAULT_XAI_PROFILE, XaiOAuth } from "./auth/oauth";
+import { XaiOAuth } from "./auth/oauth";
 import { GrokProvider } from "./provider";
 import { registerCommands } from "./commands/commands";
 import type { GrokUsageSnapshot } from "./usage/domain";
 import { renderUsageStatus } from "./usage/presentation";
 import { activeProfileFromState } from "./provider-profile";
 
-const LEGACY_USAGE_STATE_KEY = "grokCopilot.usageSnapshot.v2";
 const USAGE_STATE_KEY = "grokCopilot.usageSnapshots.v3";
 const ACTIVE_PROFILE_STATE_KEY = "grokCopilot.activeProfile.v1";
 
@@ -17,7 +16,7 @@ export function activate(context: vscode.ExtensionContext): void {
     userAgent: `grok-copilot-chat/${context.extension.packageJSON.version} VSCode/${vscode.version}`,
   });
   const storedUsage = context.globalState.get<Readonly<Record<string, GrokUsageSnapshot>>>(USAGE_STATE_KEY)
-    ?? { [DEFAULT_XAI_PROFILE]: context.globalState.get<GrokUsageSnapshot>(LEGACY_USAGE_STATE_KEY) ?? {} };
+    ?? {};
   const activeProfile = activeProfileFromState(context.globalState.get<unknown>(ACTIVE_PROFILE_STATE_KEY));
   const provider = new GrokProvider(
     oauth,
@@ -35,6 +34,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     usageStatus,
+    context.secrets.onDidChange(() => {
+      provider.clearModelCache();
+      provider.fireDidChange();
+    }),
     provider.onDidChangeActiveProfile((profile) => {
       void context.globalState.update(ACTIVE_PROFILE_STATE_KEY, profile);
     }),

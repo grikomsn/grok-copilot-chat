@@ -18,3 +18,4 @@ out/*.test.*
 tsconfig.json
 package-lock.json
 *.vsix
+test/**

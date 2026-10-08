@@ -5,6 +5,7 @@ import { buildAuthorizeUrl, normalizeProfileId, XaiOAuth, XAI_SESSION_SECRET, ty
 
 class MemoryStore implements SessionStore {
   readonly values = new Map<string, string>();
+  async keys(): Promise<string[]> { return [...this.values.keys()]; }
   async get(key: string): Promise<string | undefined> { return this.values.get(key); }
   async store(key: string, value: string): Promise<void> { this.values.set(key, value); }
   async delete(key: string): Promise<void> { this.values.delete(key); }
@@ -141,13 +142,8 @@ test("keeps profile sessions and refresh locks isolated", async () => {
   assert.deepEqual(await client.listProfiles(), ["default", "work"]);
 });
 
-test("serializes concurrent profile-index updates", async () => {
+test("discovers concurrently stored profiles without a separate index", async () => {
   const store = new MemoryStore();
-  const originalStore = store.store.bind(store);
-  store.store = async (key, value) => {
-    if (key.includes("OAuthProfiles")) await new Promise((resolve) => setTimeout(resolve, 5));
-    await originalStore(key, value);
-  };
   let token = 0;
   const client = new XaiOAuth(store, {
     now: () => 1_000,
@@ -297,3 +293,17 @@ async function callbackRequest(
   }
   throw lastError;
 }
+
+test("enumerates only canonical valid sessions without using stale profile indices", async () => {
+  const store = new MemoryStore();
+  const session = JSON.stringify({ accessToken: "access", refreshToken: "refresh", expiresAt: 1000 });
+  await store.store(XAI_SESSION_SECRET, session);
+  await store.store(`${XAI_SESSION_SECRET}.unindexed`, session);
+  await store.store("grokCopilot.xaiOAuthProfiles.v1", JSON.stringify(["ghost"]));
+  await store.store(`${XAI_SESSION_SECRET}.empty`, JSON.stringify({ accessToken: "", refreshToken: "refresh", expiresAt: 1000 }));
+  await store.store(`${XAI_SESSION_SECRET}.corrupt`, "{");
+  await store.store(`${XAI_SESSION_SECRET}.Work`, session);
+  await store.store(`${XAI_SESSION_SECRET}.invalid profile`, session);
+  await store.store("other.session", session);
+  assert.deepEqual(await new XaiOAuth(store).listProfiles(), ["default", "unindexed"]);
+});

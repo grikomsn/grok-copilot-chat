@@ -15,7 +15,8 @@ export interface ChatStreamEvent {
 
 export class ChatCompletionStreamParser {
   private buffer = "";
-  private readonly pendingTools = new Map<number, PendingToolCall>();
+  private readonly pendingTools = new Set<PendingToolCall>();
+  private readonly toolAliases = new Map<string, PendingToolCall>();
   private lastFinishReason: string | undefined;
 
   get finishReason(): string | undefined {
@@ -23,14 +24,15 @@ export class ChatCompletionStreamParser {
   }
 
   push(chunk: string): ChatStreamEvent[] {
-    this.buffer += chunk.replace(/\r\n/g, "\n");
+    this.buffer += chunk;
     const events: ChatStreamEvent[] = [];
-    let boundary: number;
-    while ((boundary = this.buffer.indexOf("\n\n")) >= 0) {
-      const block = this.buffer.slice(0, boundary);
-      this.buffer = this.buffer.slice(boundary + 2);
+    let boundary = /\r?\n\r?\n/.exec(this.buffer);
+    while (boundary) {
+      const block = this.buffer.slice(0, boundary.index);
+      this.buffer = this.buffer.slice(boundary.index + boundary[0].length);
       const event = this.parseBlock(block);
       if (event) events.push(event);
+      boundary = /\r?\n\r?\n/.exec(this.buffer);
     }
     return events;
   }
@@ -47,7 +49,7 @@ export class ChatCompletionStreamParser {
 
   private parseBlock(block: string): ChatStreamEvent | undefined {
     const data = block
-      .split("\n")
+      .split(/\r?\n/)
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice(5).trimStart())
       .join("\n")
@@ -60,7 +62,9 @@ export class ChatCompletionStreamParser {
 
     let json: Record<string, unknown>;
     try {
-      json = JSON.parse(data) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(data);
+      if (!isRecord(parsed)) return undefined;
+      json = parsed;
     } catch {
       return undefined;
     }
@@ -92,19 +96,25 @@ export class ChatCompletionStreamParser {
     if (!Array.isArray(value)) return;
     for (const raw of value) {
       if (!isRecord(raw)) continue;
-      const index = typeof raw.index === "number" ? raw.index : this.pendingTools.size;
-      const current = this.pendingTools.get(index) ?? { id: "", name: "", arguments: "" };
+      const aliases = [
+        typeof raw.index === "number" ? `index:${raw.index}` : undefined,
+        typeof raw.id === "string" && raw.id ? `id:${raw.id}` : undefined,
+      ].filter((value): value is string => value !== undefined);
+      const current = aliases.map((alias) => this.toolAliases.get(alias)).find(Boolean)
+        ?? { id: "", name: "", arguments: "" };
+      for (const alias of aliases) this.toolAliases.set(alias, current);
       if (typeof raw.id === "string") current.id = raw.id;
       const fn = isRecord(raw.function) ? raw.function : undefined;
       if (typeof fn?.name === "string") current.name += fn.name;
       if (typeof fn?.arguments === "string") current.arguments += fn.arguments;
-      this.pendingTools.set(index, current);
+      this.pendingTools.add(current);
     }
   }
 
   private flushTools(): PendingToolCall[] {
-    const tools = [...this.pendingTools.values()].filter((tool) => tool.name).map(completeToolCall);
+    const tools = [...this.pendingTools].filter((tool) => tool.name).map(completeToolCall);
     this.pendingTools.clear();
+    this.toolAliases.clear();
     return tools;
   }
 }

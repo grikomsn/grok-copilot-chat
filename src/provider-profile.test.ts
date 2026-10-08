@@ -18,7 +18,7 @@ test("wraps malformed provider-entry profiles with guidance", () => {
 });
 
 test("keeps default and named-profile model IDs distinct", () => {
-  assert.equal(profileQualifiedModelId("default", "grok-4.6"), "grok-4.6");
+  assert.equal(profileQualifiedModelId("default", "grok-4.6"), "default::grok-4.6");
   assert.equal(profileQualifiedModelId("  Personal  ", "grok-4.6"), "personal::grok-4.6");
   assert.equal(profileQualifiedModelId("team", "grok-4.6"), "team::grok-4.6");
 });
