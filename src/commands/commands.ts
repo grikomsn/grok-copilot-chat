@@ -36,8 +36,9 @@ async function manage(
   const signedIn = await oauth.hasSession(profile);
   const choices = signedIn
     ? [
-    { label: "$(account) Select profile for usage and management", action: "switch" },
+        { label: "$(account) Select profile for usage and management", action: "switch" },
         { label: "$(add) Add xAI account", action: "add" },
+        { label: "$(list-tree) Reconcile accounts and observed entries", action: "reconcile" },
         { label: "$(graph) Show API activity and spend", action: "usage" },
         { label: "$(credit-card) Open Grok subscription usage", action: "openSubscriptionUsage" },
         { label: "$(link-external) Open xAI Console usage", action: "openUsage" },
@@ -49,15 +50,24 @@ async function manage(
     : [
         { label: "$(globe) Sign in to xAI in browser", action: "signin" },
         { label: "$(key) Sign in with a device code", action: "device" },
-    { label: "$(account) Select profile for usage and management", action: "switch" },
+        { label: "$(account) Select profile for usage and management", action: "switch" },
         { label: "$(add) Add xAI account", action: "add" },
+        { label: "$(list-tree) Reconcile accounts and observed entries", action: "reconcile" },
         { label: "$(output) Show Grok logs", action: "logs" },
       ];
   const picked = await vscode.window.showQuickPick(choices, {
     title: `xAI Grok [${profile}] — ${signedIn ? "signed in" : "not signed in"}`,
   });
   if (!picked) return;
-  if (picked.action === "signin") await signInWithBrowser(oauth, provider, output, profile);
+  if (picked.action === "reconcile") {
+    const result = await provider.reconcileAccounts();
+    const detail = [
+      `Observed profiles without sessions: ${result.entriesWithoutSessions.join(", ") || "none"}`,
+      `Signed-in profiles not observed by discovery: ${result.accountsWithoutObservedEntries.join(", ") || "none"}`,
+    ].join("\n");
+    const action = await vscode.window.showInformationMessage(detail, "Manage Language Models");
+    if (action === "Manage Language Models") await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
+  } else if (picked.action === "signin") await signInWithBrowser(oauth, provider, output, profile);
   else if (picked.action === "device") await signInWithDevice(oauth, provider, output, profile);
   else if (picked.action === "switch") await selectProfile(oauth, provider);
   else if (picked.action === "add") await addAccount(oauth, provider, output);
@@ -98,6 +108,7 @@ async function signInWithBrowser(
         }
       },
     );
+    provider.clearUsage(profile);
     provider.setActiveProfile(profile);
     const models = await provider.refreshModels(profile);
     void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
@@ -135,6 +146,7 @@ async function signInWithDevice(
         }
       },
     );
+    provider.clearUsage(profile);
     provider.setActiveProfile(profile);
     const models = await provider.refreshModels(profile);
     void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
@@ -215,7 +227,7 @@ async function testConnection(provider: GrokProvider, output: vscode.OutputChann
       { location: vscode.ProgressLocation.Notification, title: "Testing xAI Grok…" },
       () => provider.testConnection(),
     );
-    output.appendLine(`[test] model=${result.model} response=${result.text}`);
+    output.appendLine(`[test] model=${result.model} completed`);
     vscode.window.showInformationMessage(`xAI verified with ${result.model}: ${result.text}`);
   } catch (error) {
     output.appendLine(`[test] ${messageOf(error)}`);

@@ -14,7 +14,6 @@ const REDIRECT_URI = `http://${OAUTH_HOST}:${OAUTH_PORT}${OAUTH_CALLBACK_PATH}`;
 const OAUTH_CALLBACK_HOST = `${OAUTH_HOST}:${OAUTH_PORT}`;
 export const XAI_SESSION_SECRET = "grokCopilot.xaiOAuthSession";
 export const DEFAULT_XAI_PROFILE = "default";
-const XAI_PROFILES_SECRET = "grokCopilot.xaiOAuthProfiles.v1";
 
 export function normalizeProfileId(value: string): string {
   const profile = value.trim().toLowerCase();
@@ -60,6 +59,7 @@ interface TokenError {
 }
 
 export interface SessionStore {
+  keys(): Thenable<string[]>;
   get(key: string): Thenable<string | undefined>;
   store(key: string, value: string): Thenable<void>;
   delete(key: string): Thenable<void>;
@@ -124,7 +124,6 @@ export class XaiOAuth {
   private readonly authorizeUrl: string;
   private readonly refreshPromises = new Map<string, { identity: string; promise: Promise<OAuthSession> }>();
   private readonly sessionMutations = new Map<string, Promise<void>>();
-  private profileIndexMutation: Promise<void> = Promise.resolve();
   private readonly profileGenerations = new Map<string, number>();
 
   constructor(
@@ -151,9 +150,9 @@ export class XaiOAuth {
     try {
       const session = JSON.parse(raw) as Partial<OAuthSession>;
       if (
-        typeof session.accessToken === "string" &&
-        typeof session.refreshToken === "string" &&
-        typeof session.expiresAt === "number"
+        typeof session.accessToken === "string" && session.accessToken.length > 0 &&
+        typeof session.refreshToken === "string" && session.refreshToken.length > 0 &&
+        Number.isFinite(session.expiresAt)
       ) {
         return session as OAuthSession;
       }
@@ -341,22 +340,17 @@ export class XaiOAuth {
   }
 
   async listProfiles(): Promise<string[]> {
-    const raw = await this.store.get(XAI_PROFILES_SECRET);
-    let candidates: string[] = [];
-    try {
-      const parsed = JSON.parse(raw ?? "[]") as unknown;
-      if (Array.isArray(parsed)) candidates = parsed.filter((value): value is string => typeof value === "string");
-    } catch {
-      // A corrupt profile index is rebuilt from the legacy default session.
-    }
-    candidates.push(DEFAULT_XAI_PROFILE);
     const profiles: string[] = [];
-    for (const candidate of candidates) {
+    for (const key of await this.store.keys()) {
+      const candidate = key === XAI_SESSION_SECRET ? DEFAULT_XAI_PROFILE
+        : key.startsWith(`${XAI_SESSION_SECRET}.`) ? key.slice(XAI_SESSION_SECRET.length + 1) : undefined;
+      if (!candidate) continue;
       try {
         const profile = normalizeProfileId(candidate);
+        if (key !== sessionSecret(profile)) continue;
         if (!profiles.includes(profile) && await this.readSession(profile)) profiles.push(profile);
       } catch {
-        // Invalid index entries are ignored.
+        // Other extension secrets and malformed sessions are not signed-in profiles.
       }
     }
     return profiles.sort();
@@ -367,7 +361,6 @@ export class XaiOAuth {
     this.invalidateProfile(normalized);
     await this.mutateSession(normalized, async () => {
       await this.store.delete(sessionSecret(normalized));
-      await this.mutateProfileIndex((profiles) => profiles.delete(normalized));
     });
   }
 
@@ -440,19 +433,6 @@ export class XaiOAuth {
   private async storeSession(session: OAuthSession, profile: string): Promise<void> {
     const normalized = normalizeProfileId(profile);
     await this.store.store(sessionSecret(normalized), JSON.stringify(session));
-    await this.mutateProfileIndex((profiles) => { profiles.add(normalized); });
-  }
-
-  private async readProfileIndex(): Promise<Set<string>> {
-    const raw = await this.store.get(XAI_PROFILES_SECRET);
-    try {
-      const parsed = JSON.parse(raw ?? "[]") as unknown;
-      return new Set(Array.isArray(parsed) ? parsed.flatMap((value) => {
-        try { return typeof value === "string" ? [normalizeProfileId(value)] : []; } catch { return []; }
-      }) : []);
-    } catch {
-      return new Set<string>();
-    }
   }
 
   private async mutateSession(profile: string, operation: () => Promise<void>): Promise<void> {
@@ -462,16 +442,6 @@ export class XaiOAuth {
     try { await current; } finally {
       if (this.sessionMutations.get(profile) === current) this.sessionMutations.delete(profile);
     }
-  }
-
-  private async mutateProfileIndex(operation: (profiles: Set<string>) => void): Promise<void> {
-    const current = this.profileIndexMutation.catch(() => undefined).then(async () => {
-      const profiles = await this.readProfileIndex();
-      operation(profiles);
-      await this.store.store(XAI_PROFILES_SECRET, JSON.stringify([...profiles].sort()));
-    });
-    this.profileIndexMutation = current;
-    await current;
   }
 
   private profileGeneration(profile: string): number {

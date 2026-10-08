@@ -84,7 +84,9 @@ export function buildResponsesRequest(
 
 export class ResponsesStreamParser {
   private buffer = "";
-  private readonly pendingTools = new Map<string, PendingToolCall>();
+  private readonly pendingTools = new Set<PendingToolCall>();
+  private readonly toolAliases = new Map<string, PendingToolCall>();
+  private readonly canonicalTools = new WeakSet<PendingToolCall>();
   private readonly completedToolIds = new Set<string>();
   private lastFinishReason: string | undefined;
   private textDeltaSeen = false;
@@ -94,14 +96,15 @@ export class ResponsesStreamParser {
   }
 
   push(chunk: string): ChatStreamEvent[] {
-    this.buffer += chunk.replace(/\r\n/g, "\n");
+    this.buffer += chunk;
     const events: ChatStreamEvent[] = [];
-    let boundary: number;
-    while ((boundary = this.buffer.indexOf("\n\n")) >= 0) {
-      const block = this.buffer.slice(0, boundary);
-      this.buffer = this.buffer.slice(boundary + 2);
+    let boundary = /\r?\n\r?\n/.exec(this.buffer);
+    while (boundary) {
+      const block = this.buffer.slice(0, boundary.index);
+      this.buffer = this.buffer.slice(boundary.index + boundary[0].length);
       const event = this.parseBlock(block);
       if (event) events.push(event);
+      boundary = /\r?\n\r?\n/.exec(this.buffer);
     }
     return events;
   }
@@ -117,7 +120,7 @@ export class ResponsesStreamParser {
   }
 
   private parseBlock(block: string): ChatStreamEvent | undefined {
-    const lines = block.split("\n");
+    const lines = block.split(/\r?\n/);
     const eventName = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
     const data = lines
       .filter((line) => line.startsWith("data:"))
@@ -148,7 +151,7 @@ export class ResponsesStreamParser {
       case "response.reasoning_summary_text.delta":
         return typeof json.delta === "string" ? { reasoning: json.delta } : undefined;
       case "response.output_item.added":
-        this.collectOutputItem(json.item);
+        this.collectOutputItem(json.item, json);
         return undefined;
       case "response.function_call_arguments.delta":
         this.collectFunctionArguments(json);
@@ -158,16 +161,20 @@ export class ResponsesStreamParser {
         return tool ? { toolCalls: [tool] } : undefined;
       }
       case "response.output_item.done": {
-        const tool = this.completeOutputItem(json.item);
+        const tool = this.completeOutputItem(json.item, json);
         return tool ? { toolCalls: [tool] } : undefined;
       }
       case "response.completed":
+      case "response.incomplete":
       case "response.done": {
         const response = isRecord(json.response) ? json.response : undefined;
         const status = response && typeof response.status === "string" ? response.status : "completed";
         if (status === "failed") throw new Error(responseError(json));
-        const finishReason = status === "incomplete" ? "length" : "stop";
+        const finishReason = status === "incomplete" || type === "response.incomplete" ? "length" : "stop";
         this.lastFinishReason = finishReason;
+        for (const [outputIndex, item] of (Array.isArray(response?.output) ? response.output : []).entries()) {
+          this.collectOutputItem(item, { output_index: outputIndex });
+        }
         const toolCalls = this.flushTools();
         const usage = response && isRecord(response.usage)
           ? response.usage
@@ -186,61 +193,83 @@ export class ResponsesStreamParser {
     }
   }
 
-  private collectOutputItem(value: unknown): void {
+  private collectOutputItem(value: unknown, event: Record<string, unknown>): void {
     if (!isRecord(value) || value.type !== "function_call") return;
-    const tool = this.findOrCreateTool(value);
+    const tool = this.findOrCreateTool({ ...event, ...value });
+    if (!tool) return;
     if (typeof value.name === "string") tool.name = value.name;
     if (typeof value.arguments === "string") tool.arguments = value.arguments;
   }
 
   private collectFunctionArguments(value: Record<string, unknown>): void {
     const tool = this.findOrCreateTool(value);
+    if (!tool) return;
     if (typeof value.name === "string") tool.name = value.name;
     if (typeof value.delta === "string") tool.arguments += value.delta;
   }
 
-  private completeFunctionCall(value: Record<string, unknown>): PendingToolCall | undefined {
+  private completeFunctionCall(value: Record<string, unknown>, itemDone = false): PendingToolCall | undefined {
     const tool = this.findOrCreateTool(value);
+    if (!tool) return undefined;
     if (typeof value.name === "string") tool.name = value.name;
     if (typeof value.arguments === "string") tool.arguments = value.arguments;
-    return this.removeTool(tool);
+    // An arguments-done may precede the item that supplies the call_id.
+    // Waiting prevents a numeric output index or item ID entering tool history.
+    if (!itemDone && !this.canonicalTools.has(tool)) return undefined;
+    return this.removeTool(tool, false);
   }
 
-  private completeOutputItem(value: unknown): PendingToolCall | undefined {
+  private completeOutputItem(value: unknown, event: Record<string, unknown>): PendingToolCall | undefined {
     if (!isRecord(value) || value.type !== "function_call") return undefined;
-    if (toolIdentifiers(value).some((identifier) => this.completedToolIds.has(identifier))) return undefined;
-    const tool = this.findOrCreateTool(value);
-    if (typeof value.name === "string") tool.name = value.name;
-    if (typeof value.arguments === "string") tool.arguments = value.arguments;
-    return this.removeTool(tool);
+    return this.completeFunctionCall({ ...event, ...value }, true);
   }
 
-  private findOrCreateTool(value: Record<string, unknown>): PendingToolCall {
+  private findOrCreateTool(value: Record<string, unknown>): PendingToolCall | undefined {
     const identifiers = toolIdentifiers(value);
-    const existing = identifiers.map((identifier) => this.pendingTools.get(identifier)).find(Boolean);
-    const tool = existing ?? { id: identifiers[0] ?? `grok-tool-${Date.now()}`, name: "", arguments: "" };
-    if (typeof value.call_id === "string" && value.call_id) tool.id = value.call_id;
-    for (const identifier of identifiers) this.pendingTools.set(identifier, tool);
+    if (identifiers.some((identifier) => this.completedToolIds.has(identifier))) {
+      for (const identifier of identifiers) this.completedToolIds.add(identifier);
+      return undefined;
+    }
+    const tool = identifiers.map((identifier) => this.toolAliases.get(identifier)).find(Boolean)
+      ?? { id: "", name: "", arguments: "" };
+    if (typeof value.call_id === "string" && value.call_id) {
+      tool.id = value.call_id;
+      this.canonicalTools.add(tool);
+    }
+    else if (!tool.id) {
+      const itemId = value.item_id ?? value.id;
+      if (typeof itemId === "string") tool.id = itemId;
+    }
+    for (const identifier of identifiers) this.toolAliases.set(identifier, tool);
+    this.pendingTools.add(tool);
     return tool;
   }
 
-  private removeTool(tool: PendingToolCall): PendingToolCall | undefined {
-    const identifiers: string[] = [];
-    for (const [key, value] of this.pendingTools) {
-      if (value === tool) {
-        identifiers.push(key);
-        this.pendingTools.delete(key);
-      }
+  /** Incomplete or unnamed calls remain pending until their owning item or EOF. */
+  private removeTool(tool: PendingToolCall, final: boolean): PendingToolCall | undefined {
+    if (!tool.name) {
+      if (final) throw new Error("xAI response stream ended with an unnamed function call");
+      return undefined;
     }
-    for (const identifier of identifiers) this.completedToolIds.add(identifier);
-    this.completedToolIds.add(tool.id);
-    return tool.name ? completeToolCall(tool) : undefined;
+    let completed: PendingToolCall;
+    try { completed = completeToolCall(tool); } catch (error) {
+      if (final) throw error;
+      return undefined;
+    }
+    this.pendingTools.delete(tool);
+    for (const [key, value] of this.toolAliases) {
+      if (value !== tool) continue;
+      this.completedToolIds.add(key);
+      this.toolAliases.delete(key);
+    }
+    return completed;
   }
 
   private flushTools(): PendingToolCall[] {
-    const tools = [...new Set(this.pendingTools.values())].filter((tool) => tool.name).map(completeToolCall);
-    this.pendingTools.clear();
-    return tools;
+    return [...this.pendingTools].flatMap((tool) => {
+      const completed = this.removeTool(tool, true);
+      return completed ? [completed] : [];
+    });
   }
 }
 
@@ -277,8 +306,13 @@ function sanitizeSchema(schema: unknown): Record<string, unknown> {
 }
 
 function toolIdentifiers(value: Record<string, unknown>): string[] {
-  return [value.call_id, value.item_id, value.id]
-    .filter((identifier): identifier is string => typeof identifier === "string" && identifier.length > 0);
+  const index = value.output_index;
+  return [
+    ...[value.call_id, value.item_id, value.id]
+      .filter((identifier): identifier is string => typeof identifier === "string" && identifier.length > 0)
+      .map((identifier) => `id:${identifier}`),
+    typeof index === "number" || typeof index === "string" ? `output:${index}` : undefined,
+  ].filter((identifier): identifier is string => identifier !== undefined);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

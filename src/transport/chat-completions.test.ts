@@ -49,3 +49,37 @@ test("rejects incomplete tool arguments and normalizes complete empty arguments"
   const events = empty.push('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"now","arguments":""}}]},"finish_reason":"tool_calls"}]}\n\n');
   assert.equal(events[0].toolCalls?.[0].arguments, "{}");
 });
+
+function chatFrame(delta: Record<string, unknown>, finishReason?: string): string {
+  return `data: ${JSON.stringify({ choices: [{ delta, ...(finishReason ? { finish_reason: finishReason } : {}) }] })}\r\n\r\n`;
+}
+
+test("retains aliases across indexed and ID-only parallel fragments", () => {
+  const parser = new ChatCompletionStreamParser();
+  const frames = [
+    chatFrame({ tool_calls: [{ index: 0, id: "first", function: { name: "read", arguments: '{"path":' } }, { index: 1, id: "second", function: { name: "read", arguments: '{"path":' } }] }),
+    chatFrame({ tool_calls: [{ id: "second", function: { arguments: '"two"}' } }, { id: "first", function: { arguments: '"one"}' } }] }),
+    chatFrame({}, "tool_calls"),
+  ];
+  const calls = frames.flatMap((frame) => parser.push(frame)).flatMap((event) => event.toolCalls ?? []);
+  assert.deepEqual(calls, [
+    { id: "first", name: "read", arguments: '{"path":"one"}' },
+    { id: "second", name: "read", arguments: '{"path":"two"}' },
+  ]);
+});
+
+test("reassembles CRLF boundaries split at every transport position", () => {
+  const frame = chatFrame({ content: "answer" }, "stop");
+  for (let position = 1; position < frame.length; position++) {
+    const parser = new ChatCompletionStreamParser();
+    const events = [...parser.push(frame.slice(0, position)), ...parser.push(frame.slice(position)), ...parser.finish()];
+    assert.equal(events.length, 1);
+    assert.equal(events[0].text, "answer");
+  }
+});
+
+test("ignores non-object SSE payloads without disrupting following frames", () => {
+  const parser = new ChatCompletionStreamParser();
+  assert.deepEqual(parser.push("data: null\n\ndata: []\n\ndata: 42\n\n"), []);
+  assert.equal(parser.push(chatFrame({ content: "answer" }, "stop"))[0].text, "answer");
+});

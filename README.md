@@ -19,12 +19,12 @@ This native VS Code `LanguageModelChatProvider` authenticates with xAI, discover
 
 - Browser/PKCE and device-code xAI sign-in with automatic refresh
 - Live Grok model discovery with six-hour persisted models.dev enrichment
-- Streaming text, reasoning, image inputs, and agent-mode tool calls
+- Streaming text, reasoning, image inputs, and isolated parallel agent-mode tool calls
 - Model-specific reasoning-effort and opt-in Web Search controls
 - Native context-window accounting from xAI token usage
 - Exact locally accumulated billed spend and rate-capacity display
 - Read-only SuperGrok weekly usage, reset, credits, and auto top-up status
-- Connection management and secret-safe diagnostics
+- Session-backed account discovery, entry reconciliation, and secret-safe diagnostics
 
 ## Quick start
 
