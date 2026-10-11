@@ -6,6 +6,11 @@ export type ProfileJournal = Readonly<Record<string, ProfileObservation>>;
 const mutations = new WeakMap<MetadataCache, Promise<void>>();
 
 /** Discovery history contains aliases and counts only; VS Code owns native entries. */
+export function hasObservedProfile(state: MetadataCache, profile: string): boolean {
+  return Object.hasOwn(readProfileJournal(state), profile);
+}
+
+/** Discovery history contains aliases and counts only; VS Code owns native entries. */
 export function readProfileJournal(state: MetadataCache): ProfileJournal {
   const value = state.get<unknown>(JOURNAL_KEY);
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};

@@ -1,17 +1,9 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
-
 const CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
-const AUTHORIZE_URL = "https://auth.x.ai/oauth2/authorize";
 const DEVICE_AUTHORIZATION_URL = "https://auth.x.ai/oauth2/device/code";
 const TOKEN_URL = "https://auth.x.ai/oauth2/token";
 const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const SCOPE = "openid profile email offline_access grok-cli:access api:access";
 const REFRESH_SKEW_MS = 120_000;
-const OAUTH_HOST = "127.0.0.1";
-const OAUTH_PORT = 56121;
-const OAUTH_CALLBACK_PATH = "/callback";
-const REDIRECT_URI = `http://${OAUTH_HOST}:${OAUTH_PORT}${OAUTH_CALLBACK_PATH}`;
-const OAUTH_CALLBACK_HOST = `${OAUTH_HOST}:${OAUTH_PORT}`;
 export const XAI_SESSION_SECRET = "grokCopilot.xaiOAuthSession";
 export const DEFAULT_XAI_PROFILE = "default";
 
@@ -72,13 +64,6 @@ export interface OAuthOptions {
   userAgent?: string;
   deviceAuthorizationUrl?: string;
   tokenUrl?: string;
-  authorizeUrl?: string;
-}
-
-export interface BrowserSignIn {
-  url: string;
-  completion: Promise<OAuthSession>;
-  cancel(): void;
 }
 
 function formHeaders(userAgent: string): Record<string, string> {
@@ -121,7 +106,6 @@ export class XaiOAuth {
   private readonly userAgent: string;
   private readonly deviceAuthorizationUrl: string;
   private readonly tokenUrl: string;
-  private readonly authorizeUrl: string;
   private readonly refreshPromises = new Map<string, { identity: string; promise: Promise<OAuthSession> }>();
   private readonly sessionMutations = new Map<string, Promise<void>>();
   private readonly profileGenerations = new Map<string, number>();
@@ -136,7 +120,6 @@ export class XaiOAuth {
     this.userAgent = options.userAgent ?? "grok-copilot-chat VSCode";
     this.deviceAuthorizationUrl = options.deviceAuthorizationUrl ?? DEVICE_AUTHORIZATION_URL;
     this.tokenUrl = options.tokenUrl ?? TOKEN_URL;
-    this.authorizeUrl = options.authorizeUrl ?? AUTHORIZE_URL;
   }
 
   async hasSession(profile = DEFAULT_XAI_PROFILE): Promise<boolean> {
@@ -176,101 +159,6 @@ export class XaiOAuth {
       throw new Error("xAI returned an incomplete device authorization response");
     }
     return device;
-  }
-
-  async startBrowserSignIn(profile = DEFAULT_XAI_PROFILE): Promise<BrowserSignIn> {
-    const normalized = normalizeProfileId(profile);
-    const generation = this.beginSessionReplacement(normalized);
-    const pkce = await generatePkce();
-    const state = randomUrlSafe(32);
-    const nonce = randomUrlSafe(32);
-    const url = buildAuthorizeUrl(this.authorizeUrl, pkce.challenge, state, nonce);
-    let server: Server | undefined;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let settled = false;
-    let rejectCompletion: (error: Error) => void = () => undefined;
-
-    const close = () => {
-      if (timeout) clearTimeout(timeout);
-      server?.close();
-      server = undefined;
-    };
-
-    const completion = new Promise<OAuthSession>((resolve, reject) => {
-      rejectCompletion = reject;
-      server = createServer(async (request, response) => {
-        if (request.headers.host !== OAUTH_CALLBACK_HOST) {
-          sendCallbackText(response, 400, "Invalid OAuth callback host.");
-          return;
-        }
-        if (request.method !== "GET") {
-          sendCallbackText(response, 405, "Method not allowed.", { Allow: "GET" });
-          return;
-        }
-        const callback = new URL(request.url ?? "/", REDIRECT_URI);
-        if (callback.pathname !== OAUTH_CALLBACK_PATH) {
-          sendCallbackText(response, 404, "Not found.");
-          return;
-        }
-        if (settled) {
-          sendCallbackText(response, 409, "This sign-in attempt is already complete.");
-          return;
-        }
-        const oauthError = callback.searchParams.get("error");
-        const code = callback.searchParams.get("code");
-        if (callback.searchParams.get("state") !== state) {
-          sendCallbackHtml(response, 400, "xAI sign-in failed", "Invalid xAI OAuth callback state.");
-          return;
-        }
-        if (oauthError) {
-          settled = true;
-          const error = new Error(callback.searchParams.get("error_description") ?? oauthError);
-          sendCallbackHtml(response, 400, "xAI sign-in failed", "The authorization request was denied. Return to Visual Studio Code for details.");
-          close();
-          reject(error);
-          return;
-        }
-        if (!code) {
-          sendCallbackHtml(response, 400, "xAI sign-in failed", "The xAI OAuth callback did not include an authorization code.");
-          return;
-        }
-        try {
-          const session = await this.exchangeAuthorizationCode(code, pkce.verifier, normalized, generation);
-          settled = true;
-          sendCallbackHtml(response, 200, "Signed in to xAI", "You can close this tab and return to Visual Studio Code.");
-          close();
-          resolve(session);
-        } catch (error) {
-          settled = true;
-          sendCallbackHtml(response, 500, "xAI sign-in failed", "Unable to complete sign-in. Return to Visual Studio Code for details.");
-          close();
-          reject(error);
-        }
-      });
-      server.once("error", (error) => {
-        settled = true;
-        close();
-        reject(new Error(`Unable to start xAI OAuth callback on ${REDIRECT_URI}: ${error.message}`));
-      });
-      server.listen(OAUTH_PORT, OAUTH_HOST);
-      timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        close();
-        reject(new Error("xAI browser sign-in timed out"));
-      }, 5 * 60_000);
-    });
-
-    return {
-      url,
-      completion,
-      cancel: () => {
-        if (settled) return;
-        settled = true;
-        close();
-        rejectCompletion(new Error("xAI sign-in cancelled"));
-      },
-    };
   }
 
   async completeDeviceSignIn(
@@ -399,24 +287,6 @@ export class XaiOAuth {
     return promise;
   }
 
-  private async exchangeAuthorizationCode(code: string, verifier: string, profile: string, generation: number): Promise<OAuthSession> {
-    const response = await this.fetcher(this.tokenUrl, {
-      method: "POST",
-      headers: formHeaders(this.userAgent),
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: REDIRECT_URI,
-        client_id: CLIENT_ID,
-        code_verifier: verifier,
-      }),
-    });
-    if (!response.ok) throw await responseError("xAI authorization-code exchange failed", response);
-    const session = toSession((await response.json()) as TokenResponse, undefined, this.now());
-    await this.writeSession(session, profile, generation);
-    return session;
-  }
-
   private async writeSession(session: OAuthSession, profile: string, expectedGeneration: number): Promise<void> {
     const normalized = normalizeProfileId(profile);
     await this.mutateSession(normalized, async () => {
@@ -461,66 +331,6 @@ export class XaiOAuth {
 
 function sessionIdentity(session: OAuthSession): string {
   return `${session.accessToken}\u0000${session.refreshToken}\u0000${session.expiresAt}`;
-}
-
-export function buildAuthorizeUrl(authorizeUrl: string, challenge: string, state: string, nonce: string): string {
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope: SCOPE,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    state,
-    nonce,
-    plan: "generic",
-    referrer: "grok-copilot-chat",
-  });
-  return `${authorizeUrl}?${params}`;
-}
-
-async function generatePkce(): Promise<{ verifier: string; challenge: string }> {
-  const verifier = randomUrlSafe(64);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return { verifier, challenge: Buffer.from(digest).toString("base64url") };
-}
-
-function randomUrlSafe(bytes: number): string {
-  return Buffer.from(crypto.getRandomValues(new Uint8Array(bytes))).toString("base64url");
-}
-
-function callbackPage(title: string, detail: string): string {
-  const escape = (value: string) => value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-  return `<!doctype html><meta charset="utf-8"><title>${escape(title)}</title><style>body{font:16px system-ui;max-width:42rem;margin:10vh auto;padding:2rem;color:#eee;background:#111}h1{color:#fff}</style><h1>${escape(title)}</h1><p>${escape(detail)}</p>`;
-}
-
-function callbackHeaders(contentType: string): Record<string, string> {
-  return {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-    "Content-Type": contentType,
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-  };
-}
-
-function sendCallbackHtml(response: ServerResponse, status: number, title: string, detail: string): void {
-  response.writeHead(status, callbackHeaders("text/html; charset=utf-8"));
-  response.end(callbackPage(title, detail));
-}
-
-function sendCallbackText(
-  response: ServerResponse,
-  status: number,
-  detail: string,
-  headers: Record<string, string> = {},
-): void {
-  response.writeHead(status, { ...callbackHeaders("text/plain; charset=utf-8"), ...headers });
-  response.end(detail);
 }
 
 function toSession(

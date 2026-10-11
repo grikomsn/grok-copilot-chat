@@ -26,6 +26,7 @@ import {
 import { ModelsDevMetadata, type MetadataCache } from "./models/metadata";
 import { grokModelCost, modelPricingFields } from "./models/pricing";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
+import { AutoSignInGate } from "./auth/auto-signin";
 import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
 import {
   XAI_AUTO_TOPUP_PATH,
@@ -48,7 +49,7 @@ import {
 } from "./provider/messages";
 import { trimChatHistoryToFit, trimResponsesInputToFit } from "./provider/history-trim";
 import { StreamResponseReporter } from "./provider/response";
-import { observeProfile, readProfileJournal, reconcileProfiles } from "./provider-journal";
+import { hasObservedProfile, observeProfile, readProfileJournal, reconcileProfiles } from "./provider-journal";
 import { createChatPromptCacheHeaders } from "./provider/prompt-cache";
 import { buildChatFunctionTool, toolMode } from "./tools/client-tools";
 import { XAI_WEB_SEARCH_TOOL } from "./tools/hosted-tools";
@@ -77,14 +78,17 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private readonly usageEmitter = new vscode.EventEmitter<{ profile: string; usage: GrokUsageSnapshot }>();
   private readonly activeProfileEmitter = new vscode.EventEmitter<string>();
+  private readonly signInRequestedEmitter = new vscode.EventEmitter<string>();
   readonly onDidChangeLanguageModelChatInformation = this.changeEmitter.event;
   readonly onDidChangeUsage = this.usageEmitter.event;
   readonly onDidChangeActiveProfile = this.activeProfileEmitter.event;
+  readonly onSignInRequested = this.signInRequestedEmitter.event;
   private readonly modelsByProfile = new Map<string, DiscoveredModel[]>();
   private readonly lastModelRefreshAt = new Map<string, number>();
   private readonly usageByProfile = new Map<string, GrokUsageSnapshot>();
   private activeProfile: string;
   private readonly metadata: ModelsDevMetadata;
+  private readonly autoSignInGate = new AutoSignInGate();
   private modelCacheGeneration = 0;
 
   private get configuration(): vscode.WorkspaceConfiguration {
@@ -111,6 +115,11 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     this.changeEmitter.fire();
   }
 
+  /** Suppresses the auto sign-in prompt for the next resolution of `profile`. */
+  suppressNextAutoSignIn(profile: string): void {
+    this.autoSignInGate.suppressNext(profile);
+  }
+
   clearModelCache(): void {
     this.modelCacheGeneration++;
     this.modelsByProfile.clear();
@@ -119,6 +128,11 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
 
   async reconcileAccounts(): Promise<ReturnType<typeof reconcileProfiles>> {
     return reconcileProfiles(readProfileJournal(this.metadataCache), await this.oauth.listProfiles());
+  }
+
+  /** Whether the host has ever resolved this profile through a configured entry. */
+  hasObservedProfile(profile: string): boolean {
+    return hasObservedProfile(this.metadataCache, profile);
   }
 
   getActiveProfile(): string {
@@ -177,7 +191,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,
   ): Promise<GrokModel[]> {
-    if (token.isCancellationRequested) return [];
+    if (token.isCancellationRequested || !options.configuration) return [];
     let profile: string;
     try {
       profile = profileFromConfiguration(options.configuration);
@@ -187,7 +201,20 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       if (!options.silent) void vscode.window.showErrorMessage(message);
       return [];
     }
-    if (!await this.oauth.hasSession(profile)) return [];
+    if (!await this.oauth.hasSession(profile)) {
+      // Both entry-creation paths (native Add Models and the provisioning
+      // command) reach the provider as a per-group resolve. A profile the host
+      // has never asked about before means a new entry was just created; offer
+      // sign-in. The gate dedupes rapid re-resolves and skips resolutions that
+      // belong to the extension's own provisioning command.
+      const firstSighting = !hasObservedProfile(this.metadataCache, profile);
+      await observeProfile(this.metadataCache, profile, 0);
+      if (firstSighting && this.autoSignInGate.shouldStartSignIn(profile)) {
+        this.output.appendLine(`[auth] entry for profile "${profile}" added natively; offering sign-in`);
+        this.signInRequestedEmitter.fire(profile);
+      }
+      return [];
+    }
     const maxAge = Math.max(1, this.configuration.get("catalogCacheMinutes", 5)) * 60_000;
     if (Date.now() - (this.lastModelRefreshAt.get(profile) ?? 0) > maxAge) {
       try {

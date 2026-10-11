@@ -12,9 +12,12 @@ export function registerCommands(
   usageStatus: vscode.StatusBarItem,
 ): vscode.Disposable[] {
   return [
-    vscode.commands.registerCommand("grokCopilot.signIn", () => signInWithBrowser(oauth, provider, output, provider.getActiveProfile())),
-    vscode.commands.registerCommand("grokCopilot.signInDevice", () => signInWithDevice(oauth, provider, output, provider.getActiveProfile())),
+    vscode.commands.registerCommand("grokCopilot.signIn", () => signIn(oauth, provider, output, provider.getActiveProfile())),
     vscode.commands.registerCommand("grokCopilot.addAccount", () => addAccount(oauth, provider, output)),
+    vscode.commands.registerCommand("grokCopilot.configureEntry", () => configureEntry(oauth, provider, output)),
+    provider.onSignInRequested((profile) => {
+      void autoSignInForProfile(oauth, provider, output, profile);
+    }),
     vscode.commands.registerCommand("grokCopilot.selectProfile", () => selectProfile(oauth, provider)),
     vscode.commands.registerCommand("grokCopilot.refreshModels", () => refreshModels(provider)),
     vscode.commands.registerCommand("grokCopilot.testConnection", () => testConnection(provider, output)),
@@ -24,6 +27,26 @@ export function registerCommands(
     vscode.commands.registerCommand("grokCopilot.diagnostics", () => diagnostics(oauth, output)),
     vscode.commands.registerCommand("grokCopilot.manage", () => manage(oauth, provider, output, usageStatus)),
   ];
+}
+
+/**
+ * Offers sign-in when a natively added entry names a profile with no session.
+ * Suppressed while the extension's own provisioning command resolves the fresh
+ * group, and debounced by the provider gate on repeated host re-resolves.
+ */
+async function autoSignInForProfile(
+  oauth: XaiOAuth,
+  provider: GrokProvider,
+  output: vscode.OutputChannel,
+  profile: string,
+): Promise<void> {
+  if (await oauth.hasSession(profile)) return;
+  const action = await vscode.window.showInformationMessage(
+    `xAI Grok entry “${profile}” is not signed in yet. Sign in now?`,
+    "Sign in",
+    "Later",
+  );
+  if (action === "Sign in") await signIn(oauth, provider, output, profile);
 }
 
 async function manage(
@@ -48,8 +71,7 @@ async function manage(
         { label: "$(sign-out) Sign out of xAI", action: "signout" },
       ]
     : [
-        { label: "$(globe) Sign in to xAI in browser", action: "signin" },
-        { label: "$(key) Sign in with a device code", action: "device" },
+        { label: "$(globe) Sign in to xAI", action: "signin" },
         { label: "$(account) Select profile for usage and management", action: "switch" },
         { label: "$(add) Add xAI account", action: "add" },
         { label: "$(list-tree) Reconcile accounts and observed entries", action: "reconcile" },
@@ -67,8 +89,7 @@ async function manage(
     ].join("\n");
     const action = await vscode.window.showInformationMessage(detail, "Manage Language Models");
     if (action === "Manage Language Models") await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
-  } else if (picked.action === "signin") await signInWithBrowser(oauth, provider, output, profile);
-  else if (picked.action === "device") await signInWithDevice(oauth, provider, output, profile);
+  } else if (picked.action === "signin") await signIn(oauth, provider, output, profile);
   else if (picked.action === "switch") await selectProfile(oauth, provider);
   else if (picked.action === "add") await addAccount(oauth, provider, output);
   else if (picked.action === "refresh") await refreshModels(provider);
@@ -86,42 +107,12 @@ async function manage(
   }
 }
 
-async function signInWithBrowser(
-  oauth: XaiOAuth,
-  provider: GrokProvider,
-  output: vscode.OutputChannel,
-  profile = DEFAULT_XAI_PROFILE,
-): Promise<void> {
-  let attempt: Awaited<ReturnType<XaiOAuth["startBrowserSignIn"]>> | undefined;
-  try {
-    attempt = await oauth.startBrowserSignIn(profile);
-    const opened = await vscode.env.openExternal(vscode.Uri.parse(attempt.url));
-    if (!opened) throw new Error("VS Code could not open the xAI authorization page");
-    await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: "Waiting for xAI browser sign-in…", cancellable: true },
-      async (_progress, cancellation) => {
-        const listener = cancellation.onCancellationRequested(() => attempt?.cancel());
-        try {
-          await attempt?.completion;
-        } finally {
-          listener.dispose();
-        }
-      },
-    );
-    provider.clearUsage(profile);
-    provider.setActiveProfile(profile);
-    const models = await provider.refreshModels(profile);
-    void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
-    vscode.window.showInformationMessage(`Signed in to xAI profile “${profile}”. Found ${models.length} Grok models.`);
-  } catch (error) {
-    attempt?.cancel();
-    const message = messageOf(error);
-    output.appendLine(`[oauth] ${message}`);
-    vscode.window.showErrorMessage(`xAI sign-in failed: ${message}`);
-  }
-}
-
-async function signInWithDevice(
+/**
+ * Device-authorization (RFC 8628) sign-in: opens the verification URL with the
+ * user code pre-filled and polls until the session is stored. Works without a
+ * loopback callback port, so it also covers remote workspaces.
+ */
+async function signIn(
   oauth: XaiOAuth,
   provider: GrokProvider,
   output: vscode.OutputChannel,
@@ -151,6 +142,7 @@ async function signInWithDevice(
     const models = await provider.refreshModels(profile);
     void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI profile “${profile}”. Found ${models.length} Grok models.`);
+    await provisionEntryAfterSignIn(provider, profile);
   } catch (error) {
     const message = messageOf(error);
     output.appendLine(`[oauth] ${message}`);
@@ -161,7 +153,7 @@ async function signInWithDevice(
 async function addAccount(oauth: XaiOAuth, provider: GrokProvider, output: vscode.OutputChannel): Promise<void> {
   const value = await vscode.window.showInputBox({
     title: "Add xAI account",
-    prompt: "Choose the profile ID you will enter when adding xAI Grok in Manage Language Models.",
+    prompt: "Choose the profile ID for this account; it is also used as the entry name in Manage Language Models.",
     placeHolder: "personal or work",
     ignoreFocusOut: true,
     validateInput: (input) => {
@@ -170,24 +162,80 @@ async function addAccount(oauth: XaiOAuth, provider: GrokProvider, output: vscod
   });
   if (!value) return;
   const profile = normalizeProfileId(value);
-  if (await oauth.hasSession(profile)) {
-    const replace = await vscode.window.showWarningMessage(
-      `Replace the xAI session stored for profile “${profile}”?`,
-      { modal: true },
-      "Replace",
-    );
-    if (replace !== "Replace") return;
+  if (!await addAccountForProfile(oauth, provider, output, profile)) return;
+  await provisionEntryAfterSignIn(provider, profile);
+}
+
+/**
+ * Provisions the native entry for a freshly signed-in profile when the user
+ * has not added one yet. The discovery journal skips profiles that already
+ * have an entry, and the suppression latch keeps the provisioning resolve
+ * from re-triggering auto sign-in.
+ */
+async function provisionEntryAfterSignIn(provider: GrokProvider, profile: string): Promise<void> {
+  if (provider.hasObservedProfile(profile)) return;
+  provider.suppressNextAutoSignIn(profile);
+  try {
+    // The host command destructures {vendor, name, ...configuration}; the rest
+    // becomes the entry's stored configuration verbatim.
+    await vscode.commands.executeCommand("lm.migrateLanguageModelsProviderGroup", {
+      vendor: "xai-grok",
+      name: profile,
+      profile,
+    });
+  } catch {
+    await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
+    vscode.window.showInformationMessage(`Sign-in complete. Add xAI Grok in Manage Language Models and enter profile “${profile}”.`);
   }
-  const method = await vscode.window.showQuickPick([
-    { label: "$(globe) Sign in in browser", method: "browser" as const },
-    { label: "$(key) Sign in with a device code", method: "device" as const },
-  ], { title: `Sign in to xAI profile “${profile}”` });
-  if (!method) return;
-  if (method.method === "browser") await signInWithBrowser(oauth, provider, output, profile);
-  else await signInWithDevice(oauth, provider, output, profile);
-  if (await oauth.hasSession(profile)) {
-    vscode.window.showInformationMessage(`Add xAI Grok in Manage Language Models and enter profile “${profile}”.`);
+}
+
+/**
+ * Native management-command configure flow: provisions the entry group first
+ * (so it appears in Manage Language Models even before signing in), then runs
+ * sign-in only when that profile has no session yet. The first provisioning
+ * resolve is suppressed so it is not mistaken for a native add.
+ */
+async function configureEntry(oauth: XaiOAuth, provider: GrokProvider, output: vscode.OutputChannel): Promise<void> {
+  const value = await vscode.window.showInputBox({
+    title: "Add xAI Grok entry",
+    prompt: "Choose a profile ID for this entry.",
+    placeHolder: "personal or work",
+    ignoreFocusOut: true,
+    validateInput: (input) => {
+      try { normalizeProfileId(input); return undefined; } catch (error) { return messageOf(error); }
+    },
+  });
+  if (!value) return;
+  const profile = normalizeProfileId(value);
+  provider.suppressNextAutoSignIn(profile);
+  try {
+    // The host command destructures {vendor, name, ...configuration}; the rest
+    // becomes the entry's stored configuration verbatim.
+    await vscode.commands.executeCommand("lm.migrateLanguageModelsProviderGroup", {
+      vendor: "xai-grok",
+      name: profile,
+      profile,
+    });
+  } catch {
+    // Host version without the provisioning command: fall back to the editor.
+    await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
   }
+  if (await oauth.hasSession(profile)) {
+    provider.setActiveProfile(profile);
+    vscode.window.showInformationMessage(`xAI Grok entry “${profile}” is ready in Manage Language Models.`);
+    return;
+  }
+  await addAccountForProfile(oauth, provider, output, profile);
+}
+
+async function addAccountForProfile(oauth: XaiOAuth, provider: GrokProvider, output: vscode.OutputChannel, profile: string): Promise<boolean> {
+  if (await oauth.hasSession(profile)) {
+    provider.setActiveProfile(profile);
+    vscode.window.showInformationMessage(`xAI profile “${profile}” is already signed in.`);
+    return true;
+  }
+  await signIn(oauth, provider, output, profile);
+  return oauth.hasSession(profile);
 }
 
 async function selectProfile(oauth: XaiOAuth, provider: GrokProvider): Promise<void> {
