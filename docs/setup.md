@@ -11,12 +11,9 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 ## Install and connect
 
 1. Install the extension from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat).
-2. Run **Grok: Add xAI Account**, choose a profile ID such as `personal`, and authorize the extension in the browser.
-3. Open **Manage Language Models**, choose **Add Models**, select **xAI Grok**, and enter that profile ID.
-4. Repeat those steps with a different profile ID to add another xAI account. Browser sign-ins are sequential because the temporary loopback callback uses one local port.
-5. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile. The profile field defaults to `default`. Every model ID is qualified by its profile, including `default`. After upgrading from 0.x, reselect your Grok model in a new chat; unqualified model IDs and old singleton usage snapshots are no longer supported.
-
-If the local callback cannot be reached, select the intended profile with **Grok: Select Profile for Usage and Management** and run **Grok: Sign In to xAI with Device Code**.
+2. Open **Manage Language Models**, choose **Add Models**, select **xAI Grok**, and follow the prompts (group name and profile ID). The entry lists no models until the profile is signed in, and Grok then offers to sign in right away. Conversely, **Grok: Add xAI Account** (or **Grok: Sign In to xAI**) provisions the matching entry automatically when none exists yet. On hosts without the provisioning command, finish by re-adding the entry with the same profile ID.
+3. Repeat those steps with a different profile ID to add another xAI account. Sign-ins are sequential per profile; the device-code authorization opens xAI's verification page with the user code pre-filled.
+4. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile. The profile field defaults to `default`. Every model ID is qualified by its profile, including `default`. After upgrading from 0.x, reselect your Grok model in a new chat; unqualified model IDs and old singleton usage snapshots are no longer supported.
 
 Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker and default to High. Models also expose a **Web Search** toggle; it is off by default, routes enabled requests through xAI's Responses API, and overrides the `grokCopilot.webSearch` workspace default for that request. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a reasoning picker because their legacy contracts do not accept the current reasoning parameter.
 
@@ -25,10 +22,10 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 | Command | Purpose |
 | --- | --- |
 | **Grok: Manage xAI Connection** | Test the connection, refresh models, reconcile accounts and observed entries, show logs, or sign out |
+| **Grok: Add Provider Entry** | Provision a Manage Language Models entry for a profile ID, then sign in only if needed |
 | **Grok: Add xAI Account** | Create or replace a named OAuth profile |
 | **Grok: Select Profile for Usage and Management** | Choose the profile used by usage and management commands; this choice is restored after restart and does not change model-entry routing |
-| **Grok: Sign In to xAI** | Start browser/PKCE authorization |
-| **Grok: Sign In to xAI with Device Code** | Authorize without a loopback browser callback |
+| **Grok: Sign In to xAI** | Authorize with an RFC 8628 device code (opens xAI's verification page with the code pre-filled) |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |
 | **Grok: Test Connection** | Send a small live inference request |
 | **Grok: Show API Activity and Spend** | Show locally tracked billed spend, request tokens, and API rate capacity |
@@ -62,8 +59,8 @@ Streaming keeps each parallel function call pending until its arguments are comp
 
 ## Troubleshooting
 
-- **No Grok models in the picker:** sign in with **Grok: Add xAI Account**, then add an xAI Grok entry with the same profile ID in **Manage Language Models**.
-- **Browser sign-in cannot complete:** cancel it and use the device-code command.
+- **No Grok models in the picker:** sign in with **Grok: Add xAI Account** — it creates the matching entry automatically; then pick a Grok model in the model picker.
+- **Sign-in cannot complete:** cancel it and start again; each attempt opens a fresh device code.
 - **Authentication or API errors:** open **Grok: Manage xAI Connection**, test the connection, and inspect the Grok output channel.
 - **HTTP 426 asking you to update Grok CLI:** update this extension and reload VS Code. The extension sends its own proxy compatibility header; installing or updating a separate Grok CLI does not change it. Model discovery can still work while inference is rejected.
 - **HTTP 400 mentioning a lone surrogate:** update this extension and retry the conversation. Text-part boundaries preserve split emoji, and unrecoverable UTF-16 surrogates are replaced with `�` before requests are encoded.

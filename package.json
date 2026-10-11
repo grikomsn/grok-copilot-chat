@@ -47,12 +47,12 @@
         "title": "Grok: Sign In to xAI"
       },
       {
-        "command": "grokCopilot.signInDevice",
-        "title": "Grok: Sign In to xAI with Device Code"
-      },
-      {
         "command": "grokCopilot.addAccount",
         "title": "Grok: Add xAI Account"
+      },
+      {
+        "command": "grokCopilot.configureEntry",
+        "title": "Grok: Add Provider Entry"
       },
       {
         "command": "grokCopilot.selectProfile",

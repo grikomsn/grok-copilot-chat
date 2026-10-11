@@ -6,12 +6,7 @@ Access and refresh tokens are stored per named profile in VS Code `SecretStorage
 
 Expired access tokens are refreshed automatically with a separate refresh lock per profile, including refresh-token rotation when xAI returns a replacement.
 
-The extension supports two OAuth paths:
-
-- Browser authorization with PKCE and a temporary loopback callback
-- RFC 8628 device authorization when a loopback callback is unavailable
-
-Both flows use xAI's public Grok CLI OAuth client configuration. No client secret is embedded in the extension.
+The extension signs in with RFC 8628 device authorization using xAI's public Grok CLI OAuth client configuration. No client secret is embedded in the extension, and no local callback server is opened.
 
 ## Network destinations
 
