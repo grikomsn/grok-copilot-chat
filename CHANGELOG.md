@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2
+
+### Patch Changes
+
+- 39f76de: Map aborted requests to a friendly "Request cancelled or timed out" message in
+  shared error formatting instead of surfacing the raw AbortError text.
+
 ## 1.1.1
 
 ### Patch Changes
