@@ -1,3 +1,7 @@
 export function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) {
+    if (error.name === "AbortError") return "Request cancelled or timed out";
+    return error.message;
+  }
+  return String(error);
 }
