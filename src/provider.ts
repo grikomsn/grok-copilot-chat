@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
+import { estimateChatTokens } from "./provider/token-count";
+import { withContextOverflowHint } from "./provider/context-error";
 import { stringifyWellFormedJson } from "./transport/unicode";
 import { messageOf } from "./errors";
 import {
@@ -362,6 +364,8 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         reader.releaseLock();
       }
       if (finalUsage) this.captureRequestUsage(finalUsage, model.rawModelId, model.profile);
+    } catch (error) {
+      throw withContextOverflowHint(error);
     } finally {
       pending.cleanup();
     }
@@ -372,8 +376,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     value: string | vscode.LanguageModelChatRequestMessage,
     _token: vscode.CancellationToken,
   ): Promise<number> {
-    const text = typeof value === "string" ? value : messageToText(value);
-    return Math.max(1, Math.ceil(text.length / 4));
+    return estimateChatTokens(value);
   }
 
   async testConnection(profile = this.activeProfile): Promise<{ model: string; text: string }> {

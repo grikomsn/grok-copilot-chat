@@ -34,6 +34,8 @@ This native VS Code `LanguageModelChatProvider` authenticates with xAI, discover
 
 Composer controls override workspace defaults; reasoning defaults to High when supported and Web Search remains off until enabled. Click the Grok status-bar item to inspect locally tracked spend and tokens, transient API capacity, and any subscription snapshot exposed by the account.
 
+Context token counts are estimates. Tool-result text, tool arguments, thinking, and image inputs are included in context budgeting. If the service rejects a full context window, run `/compact` in Copilot Chat, reduce attachments or tool output, or start a new chat.
+
 ## Documentation
 
 - [Setup, commands, settings, and troubleshooting](https://github.com/grikomsn/grok-copilot-chat/blob/main/docs/setup.md)
