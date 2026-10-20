@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3
+
+### Patch Changes
+
+- a97e2a3: Count tool results, tool arguments, thinking, and image inputs when budgeting Copilot Chat context, and explain how to recover from context-window errors.
+
 ## 1.1.2
 
 ### Patch Changes
