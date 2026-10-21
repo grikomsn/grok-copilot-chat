@@ -76,7 +76,11 @@ async function run() {
 
     // The selection rule follows the captured origin. A sign-in the workspace
     // triggered must not change the user's account, even though the bound
-    // account is the one that was signed in to.
+    // account is the one that was signed in to. This is checked while the
+    // binding is still in effect, so the signed-in account is also the
+    // effective account.
+    await configuration.update("profile", "work", vscode.ConfigurationTarget.WorkspaceFolder);
+    assert.equal(provider.getEffectiveProfile(), "work");
     applySignInSelection(provider, "work", false);
     assert.equal(provider.getActiveProfile(), "default", "a workspace-triggered sign-in must not change the active account");
 
