@@ -159,6 +159,16 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 
   /**
+   * Whether the current workspace is bound to a specific account.
+   *
+   * A bound workspace owns its account, so signing in there must not change
+   * the account the user selected for usage and management.
+   */
+  isWorkspaceBound(): boolean {
+    return this.workspaceBindingProfile() !== undefined;
+  }
+
+  /**
    * The account the current workspace is bound to, if any.
    *
    * The binding is derived from the default entry so that one entry's binding

@@ -5,6 +5,7 @@ import { GrokProvider } from "../provider";
 import { formatUsageRows } from "../usage/domain";
 import { toUsageQuickPickItem, type UsageQuickPickItem } from "../usage/presentation";
 import { PROFILE_SETTING } from "../workspace-binding";
+import { signInSelection } from "../auth/selection";
 
 export function registerCommands(
   oauth: XaiOAuth,
@@ -48,7 +49,8 @@ async function autoSignInForProfile(
     "Sign in",
     "Later",
   );
-  if (action === "Sign in") await signIn(oauth, provider, output, profile);
+  // The entry was created by the user, so signing in to it selects it.
+  if (action === "Sign in") await signIn(oauth, provider, output, profile, { explicit: true });
 }
 
 async function manage(
@@ -129,6 +131,7 @@ async function signIn(
   provider: GrokProvider,
   output: vscode.OutputChannel,
   profile = DEFAULT_XAI_PROFILE,
+  options: { readonly explicit?: boolean } = {},
 ): Promise<void> {
   try {
     const device = await oauth.requestDeviceCode();
@@ -151,9 +154,11 @@ async function signIn(
     );
     provider.clearUsage(profile);
     // A workspace binding owns the account for this repository, so signing in
-    // to it must not change the account the user selected globally. The
-    // persisted active profile stays the user's own choice.
-    if (profile === provider.getActiveProfile()) provider.setActiveProfile(profile);
+    // for the workspace must not change the account the user selected
+    // globally. A sign-in the user asked for by name does select it.
+    if (signInSelection(provider.isWorkspaceBound(), options.explicit === true) === "select") {
+      provider.setActiveProfile(profile);
+    }
     const models = await provider.refreshModels(profile);
     void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI profile “${profile}”. Found ${models.length} Grok models.`);
@@ -245,11 +250,14 @@ async function configureEntry(oauth: XaiOAuth, provider: GrokProvider, output: v
 
 async function addAccountForProfile(oauth: XaiOAuth, provider: GrokProvider, output: vscode.OutputChannel, profile: string): Promise<boolean> {
   if (await oauth.hasSession(profile)) {
+    // Adding an account the user named selects it. A workspace that is bound
+    // to another account keeps ownership of its own requests, but the user's
+    // choice for usage and management still follows what they just added.
     provider.setActiveProfile(profile);
     vscode.window.showInformationMessage(`xAI profile “${profile}” is already signed in.`);
     return true;
   }
-  await signIn(oauth, provider, output, profile);
+  await signIn(oauth, provider, output, profile, { explicit: true });
   return oauth.hasSession(profile);
 }
 
