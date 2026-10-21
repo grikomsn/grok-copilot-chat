@@ -89,6 +89,13 @@ async function run() {
     assert.equal(provider.getEffectiveProfile(), "default");
     assert.equal(provider.getActiveProfile(), "default");
 
+    // The same rule holds while no binding is in effect. A workspace-triggered
+    // sign-in keeps the user's account there too, so an implementation that
+    // selected whenever the signed-in account matched the effective one would
+    // fail here.
+    applySignInSelection(provider, "work", false);
+    assert.equal(provider.getActiveProfile(), "default", "a workspace-triggered sign-in must not change the active account");
+
     // A sign-in the user asked for by name selects the account.
     applySignInSelection(provider, "personal", true);
     assert.equal(provider.getActiveProfile(), "personal", "a sign-in the user asked for must select the account");
