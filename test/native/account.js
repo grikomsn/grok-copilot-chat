@@ -2,14 +2,17 @@ const assert = require("node:assert/strict");
 const vscode = require("vscode");
 const { GrokProvider } = require("../../out/provider");
 const { XaiOAuth, XAI_SESSION_SECRET } = require("../../out/auth/oauth");
-const { signInSelection } = require("../../out/auth/selection");
+const { applySignInSelection } = require("../../out/commands/commands");
 
 /**
  * Validates the account separation a workspace binding creates.
  *
- * A binding routes chat requests to the bound account. Usage and management
- * keep using the account the user selected, so a repository cannot reach
- * another account's usage or spend.
+ * A binding routes chat requests to the account the repository names. Usage
+ * and management keep using the account the user selected, so a repository
+ * cannot reach another account's usage or spend.
+ *
+ * The probe drives the real provider and the real sign-in request event, so a
+ * regression that drops the origin of a profile fails here.
  */
 async function run() {
   const folder = vscode.workspace.workspaceFolders?.[0];
@@ -35,7 +38,6 @@ async function run() {
     // The user selected "default" for usage and management.
     assert.equal(provider.getActiveProfile(), "default");
     assert.equal(provider.getEffectiveProfile(), "default");
-    assert.equal(provider.isWorkspaceBound(), false);
 
     // The repository binds this workspace to "work".
     await configuration.update("profile", "work", vscode.ConfigurationTarget.WorkspaceFolder);
@@ -44,34 +46,52 @@ async function run() {
 
     // Requests use the bound account.
     assert.equal(provider.getEffectiveProfile(), "work");
-    assert.equal(provider.isWorkspaceBound(), true);
 
-    // Usage and management keep using the account the user selected.
+    // Usage and management keep using the account the user selected. The
+    // bound account has usage of its own, and the two must not be confused.
     assert.equal(provider.getActiveProfile(), "default", "a binding must not change the user's active account");
-    // The bound account keeps its own usage, but it is not the usage the
-    // status bar and the usage popup report.
     provider.clearUsage("work");
-    assert.equal(provider.getUsageSnapshot().updatedAt, undefined, "usage must not report the bound account");
-    assert.deepEqual(provider.getUsageSnapshot("work"), {}, "the bound account keeps its own usage slot");
-    assert.deepEqual(provider.getUsageSnapshots(), { work: {} }, "each account keeps its own usage");
+    provider.clearUsage("default");
+    assert.notEqual(provider.getUsageSnapshot("work"), provider.getUsageSnapshot(), "the bound account's usage must not be the active account's usage");
+    assert.deepEqual(provider.getUsageSnapshots(), { work: {}, default: {} }, "each account keeps its own usage");
 
-    // A sign-in for the bound account keeps the user's own account.
-    assert.equal(signInSelection(provider.isWorkspaceBound(), false), "keep");
-    // A sign-in the user asked for by name selects it, bound or not.
-    assert.equal(signInSelection(provider.isWorkspaceBound(), true), "select");
-    assert.equal(signInSelection(false, true), "select");
-    // A sign-in in an unbound workspace selects the account it signed in to.
-    assert.equal(signInSelection(false, false), "select");
+    // The sign-in request carries the origin of the profile. A profile a
+    // binding selected was not the user's choice, so it is not explicit.
+    const requests = [];
+    provider.onSignInRequested((request) => requests.push(request));
+    await configuration.update("profile", "unsigned", vscode.ConfigurationTarget.WorkspaceFolder);
+    await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, {});
+    const bound = requests.find((request) => request.profile === "unsigned");
+    assert.ok(bound, "the provider must ask for a sign-in for the unsigned bound profile");
+    assert.equal(bound.explicit, false, "a binding-selected profile must not be explicit");
+
+    // A profile the user named is explicit. It uses a different name so the
+    // discovery journal treats it as a first sighting.
+    requests.length = 0;
+    await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "personal" } }, {});
+    const named = requests.find((request) => request.profile === "personal");
+    assert.ok(named, "the provider must ask for a sign-in for the unsigned named profile");
+    assert.equal(named.explicit, true, "a user-named profile must be explicit");
+
+    // The selection rule follows the captured origin. A sign-in the workspace
+    // triggered must not change the user's account, even though the bound
+    // account is the one that was signed in to.
+    applySignInSelection(provider, "work", false);
+    assert.equal(provider.getActiveProfile(), "default", "a workspace-triggered sign-in must not change the active account");
 
     // Changing the binding back restores the user's account.
     await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
     assert.equal(provider.getEffectiveProfile(), "default");
     assert.equal(provider.getActiveProfile(), "default");
-    assert.equal(provider.isWorkspaceBound(), false);
+
+    // A sign-in the user asked for by name selects the account.
+    applySignInSelection(provider, "personal", true);
+    assert.equal(provider.getActiveProfile(), "personal", "a sign-in the user asked for must select the account");
   } finally {
     await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
     globalThis.fetch = previousFetch;
   }
-  console.log(JSON.stringify({ provider: "grok", accountChecks: "a binding routes requests while usage and management keep the user's account, and the sign-in rule keeps an explicit selection", passed: true }));
+  console.log(JSON.stringify({ provider: "grok", accountChecks: "a binding routes requests while usage and management keep the user's account, and the sign-in request carries the profile origin", passed: true }));
 }
 module.exports = { run };

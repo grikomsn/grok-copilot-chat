@@ -126,11 +126,27 @@ async function manage(
 }
 
 /**
+ * Applies the account selection that follows a sign-in.
+ *
+ * The decision uses the origin captured when the sign-in was requested, not
+ * the binding as it stands now. The binding may have changed while the
+ * authorization was in progress, and a named-entry mapping is a binding that
+ * the default-entry check does not see.
+ */
+export function applySignInSelection(
+  provider: GrokProvider,
+  profile: string,
+  explicit: boolean,
+): void {
+  if (signInSelection(explicit) === "select") provider.setActiveProfile(profile);
+}
+
+/**
  * Device-authorization (RFC 8628) sign-in: opens the verification URL with the
  * user code pre-filled and polls until the session is stored. Works without a
  * loopback callback port, so it also covers remote workspaces.
  */
-async function signIn(
+export async function signIn(
   oauth: XaiOAuth,
   provider: GrokProvider,
   output: vscode.OutputChannel,
@@ -157,12 +173,7 @@ async function signIn(
       },
     );
     provider.clearUsage(profile);
-    // A workspace binding owns the account for this repository, so signing in
-    // for the workspace must not change the account the user selected
-    // globally. A sign-in the user asked for by name does select it.
-    if (signInSelection(provider.isWorkspaceBound(), options.explicit === true) === "select") {
-      provider.setActiveProfile(profile);
-    }
+    applySignInSelection(provider, profile, options.explicit === true);
     const models = await provider.refreshModels(profile);
     void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI profile “${profile}”. Found ${models.length} Grok models.`);
