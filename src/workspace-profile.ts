@@ -24,8 +24,7 @@ export interface ProfileScopeValues {
   /** Workspace-scoped per-entry overrides. */
   readonly workspaceMap?: Readonly<Record<string, string>> | undefined;
   /** User-scoped per-entry overrides. */
-  readonly userMap?: Readonly<Record<string, string>> | undefined;
-}
+  readonly userMap?: Readonly<Record<string, string>> | undefined;}
 
 export interface ProfileResolution {
   /** The xAI profile that Grok requests should use. */
@@ -75,8 +74,10 @@ function normalizeEntryProfile(entryProfile: string): string {
 /**
  * Reads a per-entry override map and validates both keys and values.
  *
- * Malformed entries are dropped so one bad value cannot break the whole
- * binding. Returns the valid overrides and whether any value was rejected.
+ * Keys are normalized to profile IDs so a map written as `{ "Work": "personal" }`
+ * still matches the entry named `work`. Malformed entries are dropped so one
+ * bad value cannot break the whole binding. Returns the valid overrides and
+ * whether any key or value was rejected.
  */
 export function classifyProfileMap(
   value: unknown,
@@ -138,9 +139,13 @@ export function resolveProfileBinding(
   for (const [source, key] of mapScopes) {
     if (source !== "user" && !options.trusted) continue;
     for (const scope of scopes) {
-      const map = scope[key];
-      if (!map) continue;
-      const override = map[entry];
+      const raw = scope[key];
+      if (!raw) continue;
+      // Normalize the map keys so a map written as { "Work": "personal" }
+      // matches the entry named "work", the same way the shorthand does.
+      const { overrides, invalid: mapInvalid } = classifyProfileMap(raw);
+      if (mapInvalid) note(source);
+      const override = overrides[entry];
       if (override === undefined) continue;
       const classified = classify(override);
       if (classified.kind === "invalid") {

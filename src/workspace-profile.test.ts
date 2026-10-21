@@ -70,6 +70,15 @@ test("leaves an entry alone when the mapping names a different entry", () => {
   assert.equal(resolution.source, "entry");
 });
 
+test("normalizes the entry names in a per-entry mapping", () => {
+  // A map written as { "Work": "personal" } must match the entry named
+  // "work", the same way the shorthand normalizes its value.
+  const resolution = resolveProfileBinding("work", [{ folderMap: { Work: "personal" } }], { trusted: true });
+  assert.equal(resolution.profile, "personal");
+  assert.equal(resolution.source, "folder");
+  assert.equal(resolution.bound, true);
+});
+
 test("ignores workspace and folder bindings in an untrusted workspace", () => {
   const resolution = resolveProfileBinding(
     "default",

@@ -148,17 +148,3 @@ export function resolveWorkspaceProfilesQuietly(entryProfile: string): Workspace
     invalid,
   };
 }
-
-/**
- * The profile to use for the Manage Language Models entry, given the profile
- * it names. Falls back to the default profile for a malformed entry.
- */
-export function entryProfileOrDefault(entryProfile: string): string {
-  try {
-    return normalizeProfileId(entryProfile);
-  } catch {
-    return DEFAULT_XAI_PROFILE;
-  }
-}
-
-export { classifyProfileMap };
