@@ -4,6 +4,7 @@ import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth } from "../auth/oauth
 import { GrokProvider } from "../provider";
 import { formatUsageRows } from "../usage/domain";
 import { toUsageQuickPickItem, type UsageQuickPickItem } from "../usage/presentation";
+import { PROFILE_SETTING } from "../workspace-binding";
 
 export function registerCommands(
   oauth: XaiOAuth,
@@ -19,6 +20,7 @@ export function registerCommands(
       void autoSignInForProfile(oauth, provider, output, profile);
     }),
     vscode.commands.registerCommand("grokCopilot.selectProfile", () => selectProfile(oauth, provider)),
+    vscode.commands.registerCommand("grokCopilot.bindAccountToWorkspace", () => bindAccountToWorkspace(oauth, provider)),
     vscode.commands.registerCommand("grokCopilot.refreshModels", () => refreshModels(provider)),
     vscode.commands.registerCommand("grokCopilot.testConnection", () => testConnection(provider, output)),
     vscode.commands.registerCommand("grokCopilot.showUsage", () => showUsage(provider, output)),
@@ -56,10 +58,14 @@ async function manage(
   usageStatus: vscode.StatusBarItem,
 ): Promise<void> {
   const profile = provider.getActiveProfile();
-  const signedIn = await oauth.hasSession(profile);
+  const effective = provider.getEffectiveProfile();
+  const bound = effective !== profile;
+  const signedIn = await oauth.hasSession(effective);
+  const bindChoice = { label: "$(folder) Bind account to this workspace", action: "bind" };
   const choices = signedIn
     ? [
         { label: "$(account) Select profile for usage and management", action: "switch" },
+        bindChoice,
         { label: "$(add) Add xAI account", action: "add" },
         { label: "$(list-tree) Reconcile accounts and observed entries", action: "reconcile" },
         { label: "$(graph) Show API activity and spend", action: "usage" },
@@ -73,12 +79,15 @@ async function manage(
     : [
         { label: "$(globe) Sign in to xAI", action: "signin" },
         { label: "$(account) Select profile for usage and management", action: "switch" },
+        bindChoice,
         { label: "$(add) Add xAI account", action: "add" },
         { label: "$(list-tree) Reconcile accounts and observed entries", action: "reconcile" },
         { label: "$(output) Show Grok logs", action: "logs" },
       ];
   const picked = await vscode.window.showQuickPick(choices, {
-    title: `xAI Grok [${profile}] — ${signedIn ? "signed in" : "not signed in"}`,
+    title: bound
+      ? `xAI Grok [${effective} — bound to this workspace] — ${signedIn ? "signed in" : "not signed in"}`
+      : `xAI Grok [${profile}] — ${signedIn ? "signed in" : "not signed in"}`,
   });
   if (!picked) return;
   if (picked.action === "reconcile") {
@@ -91,6 +100,7 @@ async function manage(
     if (action === "Manage Language Models") await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
   } else if (picked.action === "signin") await signIn(oauth, provider, output, profile);
   else if (picked.action === "switch") await selectProfile(oauth, provider);
+  else if (picked.action === "bind") await bindAccountToWorkspace(oauth, provider);
   else if (picked.action === "add") await addAccount(oauth, provider, output);
   else if (picked.action === "refresh") await refreshModels(provider);
   else if (picked.action === "usage") await showUsage(provider, output);
@@ -258,6 +268,53 @@ async function selectProfile(oauth: XaiOAuth, provider: GrokProvider): Promise<v
     "Choose Chat Model",
   );
   if (choose === "Choose Chat Model") await vscode.commands.executeCommand("workbench.action.chat.openModelPicker");
+}
+
+/**
+ * Binds the current workspace to a signed-in xAI account.
+ *
+ * The binding is written to the workspace settings so the repository keeps
+ * using that account. It is only written to the user settings when no folder
+ * is open, because a folder-scoped value is what a repository can share.
+ */
+async function bindAccountToWorkspace(oauth: XaiOAuth, provider: GrokProvider): Promise<void> {
+  const profiles = await oauth.listProfiles();
+  if (!profiles.length) {
+    vscode.window.showInformationMessage("No xAI Grok profiles are signed in yet. Run Grok: Add xAI Account first.");
+    return;
+  }
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  const picked = await vscode.window.showQuickPick(
+    await Promise.all(profiles.map(async (profile) => {
+      const session = await oauth.readSession(profile);
+      return { label: profile, description: session?.email ?? "Signed in", profile };
+    })),
+    {
+      title: folder
+        ? `Bind this workspace to an xAI Grok account (${folder.name})`
+        : "Bind this workspace to an xAI Grok account",
+      placeHolder: "The account used by Grok models in this workspace",
+    },
+  );
+  if (!picked) return;
+  const target = folder
+    ? vscode.ConfigurationTarget.WorkspaceFolder
+    : vscode.ConfigurationTarget.Global;
+  try {
+    await vscode.workspace
+      .getConfiguration("grokCopilot", folder?.uri)
+      .update(PROFILE_SETTING, picked.profile, target);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Could not bind this workspace: ${messageOf(error)}`);
+    return;
+  }
+  provider.clearModelCache();
+  provider.fireDidChange();
+  vscode.window.showInformationMessage(
+    folder
+      ? `This workspace now uses the xAI Grok profile “${picked.profile}”.`
+      : `xAI Grok now uses the profile “${picked.profile}” in this window.`,
+  );
 }
 
 async function refreshModels(provider: GrokProvider): Promise<void> {

@@ -10,9 +10,12 @@ export interface UsageQuickPickItem extends vscode.QuickPickItem {
   action?: "openSubscriptionUsage" | "openUsage" | "refresh";
 }
 
-export function renderUsageStatus(item: vscode.StatusBarItem, snapshot: GrokUsageSnapshot): void {
+export function renderUsageStatus(item: vscode.StatusBarItem, snapshot: GrokUsageSnapshot, account?: string): void {
   item.text = formatUsageStatusBar(snapshot);
   item.tooltip = formatUsageTooltip(snapshot);
+  if (account) {
+    item.tooltip = `${account}\n${item.tooltip}`;
+  }
 }
 
 export function toUsageQuickPickItem(row: UsageDisplayRow): UsageQuickPickItem {

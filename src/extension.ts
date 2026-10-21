@@ -28,7 +28,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   usageStatus.name = "Grok usage and API activity";
   usageStatus.command = "grokCopilot.showUsage";
-  renderUsageStatus(usageStatus, provider.getUsageSnapshot());
+  renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
   updateUsageStatusVisibility(usageStatus);
 
   context.subscriptions.push(
@@ -42,7 +42,7 @@ export function activate(context: vscode.ExtensionContext): void {
       void context.globalState.update(ACTIVE_PROFILE_STATE_KEY, profile);
     }),
     provider.onDidChangeUsage(({ profile, usage }) => {
-      if (profile === provider.getActiveProfile()) renderUsageStatus(usageStatus, usage);
+      if (profile === provider.getEffectiveProfile()) renderUsageStatus(usageStatus, usage);
       updateUsageStatusVisibility(usageStatus);
       void context.globalState.update(USAGE_STATE_KEY, provider.getUsageSnapshots());
     }),
@@ -57,6 +57,24 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration("grokCopilot.showUsageStatusBar")) {
         updateUsageStatusVisibility(usageStatus);
       }
+      // A workspace binding change can move this repository to another xAI
+      // account, so the model list has to be resolved again.
+      if (
+        event.affectsConfiguration("grokCopilot.profile")
+        || event.affectsConfiguration("grokCopilot.profileMap")
+        || event.affectsConfiguration("grokCopilot.workspaceBinding")
+      ) {
+        provider.clearModelCache();
+        provider.fireDidChange();
+      }
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      provider.clearModelCache();
+      provider.fireDidChange();
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      provider.clearModelCache();
+      provider.fireDidChange();
     }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     ...registerCommands(oauth, provider, output, usageStatus),

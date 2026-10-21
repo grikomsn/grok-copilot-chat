@@ -59,6 +59,10 @@
         "title": "Grok: Select Profile for Usage and Management"
       },
       {
+        "command": "grokCopilot.bindAccountToWorkspace",
+        "title": "Grok: Bind Account to This Workspace"
+      },
+      {
         "command": "grokCopilot.refreshModels",
         "title": "Grok: Refresh Models"
       },
@@ -138,6 +142,34 @@
           "type": "boolean",
           "default": true,
           "description": "Show Grok API activity and subscription usage in the VS Code status bar."
+        },
+        "grokCopilot.profile": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "pattern": "^$|^[a-z0-9][a-z0-9._-]{0,63}$",
+          "description": "xAI Grok profile to use in this workspace or folder. Set it in .vscode/settings.json to pin a repository to a specific xAI account. Only the entry named 'default' is repointed; use grokCopilot.profileMap for other entries."
+        },
+        "grokCopilot.profileMap": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "description": "Maps Manage Language Models entry names to xAI Grok profiles for this workspace or folder. For example { \"work\": \"personal\" } sends the 'work' entry to the 'personal' xAI account."
+        },
+        "grokCopilot.workspaceBinding": {
+          "type": "string",
+          "enum": [
+            "trusted",
+            "on",
+            "off"
+          ],
+          "default": "trusted",
+          "scope": "resource",
+          "description": "Whether workspace and folder profile bindings are honoured. 'trusted' only honours them in a workspace VS Code trusts, 'on' always honours them, and 'off' ignores them."
         }
       }
     },

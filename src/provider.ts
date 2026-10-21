@@ -30,6 +30,7 @@ import { grokModelCost, modelPricingFields } from "./models/pricing";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
 import { AutoSignInGate } from "./auth/auto-signin";
 import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
+import { resolveWorkspaceProfiles, type ProfileResolution } from "./workspace-binding";
 import {
   XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
@@ -89,6 +90,8 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private readonly lastModelRefreshAt = new Map<string, number>();
   private readonly usageByProfile = new Map<string, GrokUsageSnapshot>();
   private activeProfile: string;
+  /** Profile pinned by the current workspace, if any. Not persisted. */
+  private boundProfile: string | undefined;
   private readonly metadata: ModelsDevMetadata;
   private readonly autoSignInGate = new AutoSignInGate();
   private modelCacheGeneration = 0;
@@ -141,13 +144,42 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return this.activeProfile;
   }
 
+  /**
+   * The profile that requests actually use.
+   *
+   * A workspace binding pins the current repository to an account, so it wins
+   * over the account the user last selected for usage and management. The
+   * bound profile is derived from the workspace and is never persisted, so a
+   * repository cannot repoint the account used in an unrelated workspace.
+   */
+  getEffectiveProfile(): string {
+    return this.boundProfile ?? this.activeProfile;
+  }
+
+  /**
+   * Resolves the profile a Manage Language Models entry should use.
+   *
+   * The entry's own profile is the baseline. A workspace binding can pin a
+   * repository to a different account. The bound profile is derived from the
+   * default entry so that one entry's binding cannot overwrite another's.
+   */
+  private resolveBinding(entryProfile: string): ProfileResolution {
+    const resolved = resolveWorkspaceProfiles(entryProfile);
+    const bound = resolved.workspace.bound ? resolved.workspace.profile : undefined;
+    if (this.boundProfile !== bound) {
+      this.boundProfile = bound;
+      this.changeEmitter.fire();
+    }
+    return resolved.entry;
+  }
+
   setActiveProfile(profile: string): void {
     this.activeProfile = normalizeProfileId(profile);
     this.activeProfileEmitter.fire(this.activeProfile);
     this.usageEmitter.fire({ profile: this.activeProfile, usage: this.getUsageSnapshot() });
   }
 
-  getUsageSnapshot(profile = this.activeProfile): GrokUsageSnapshot {
+  getUsageSnapshot(profile = this.getEffectiveProfile()): GrokUsageSnapshot {
     return this.usageByProfile.get(profile) ?? {};
   }
 
@@ -155,11 +187,11 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return Object.fromEntries(this.usageByProfile);
   }
 
-  clearUsage(profile = this.activeProfile): void {
+  clearUsage(profile = this.getEffectiveProfile()): void {
     this.setAndEmitUsage(profile, {});
   }
 
-  async refreshModels(profile = this.activeProfile): Promise<string[]> {
+  async refreshModels(profile = this.getEffectiveProfile()): Promise<string[]> {
     const models = await this.discoverModels(profile);
     this.changeEmitter.fire();
     return models.map((model) => model.id);
@@ -194,14 +226,19 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     token: vscode.CancellationToken,
   ): Promise<GrokModel[]> {
     if (token.isCancellationRequested || !options.configuration) return [];
-    let profile: string;
+    let entryProfile: string;
     try {
-      profile = profileFromConfiguration(options.configuration);
+      entryProfile = profileFromConfiguration(options.configuration);
     } catch (error) {
       const message = messageOf(error);
       this.output.appendLine(`[models] ${message}`);
       if (!options.silent) void vscode.window.showErrorMessage(message);
       return [];
+    }
+    const binding = this.resolveBinding(entryProfile);
+    const profile = binding.profile;
+    if (binding.bound) {
+      this.output.appendLine(`[models] entry "${entryProfile}" bound to profile "${profile}" by ${binding.source} scope`);
     }
     if (!await this.oauth.hasSession(profile)) {
       // Both entry-creation paths (native Add Models and the provisioning
@@ -379,7 +416,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return estimateChatTokens(value);
   }
 
-  async testConnection(profile = this.activeProfile): Promise<{ model: string; text: string }> {
+  async testConnection(profile = this.getEffectiveProfile()): Promise<{ model: string; text: string }> {
     const session = await this.oauth.getSession(false, profile);
     const model = pickTestModel(this.modelsFor(profile));
     const response = await fetch(`${XAI_OAUTH_API_BASE}/chat/completions`, {
@@ -408,7 +445,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return { model, text: body.choices?.[0]?.message?.content?.trim() ?? "(empty response)" };
   }
 
-  async refreshUsage(profile = this.activeProfile): Promise<GrokUsageSnapshot> {
+  async refreshUsage(profile = this.getEffectiveProfile()): Promise<GrokUsageSnapshot> {
     try {
       await this.discoverModels(profile);
       this.mergeAndEmitUsage(profile, { apiError: undefined, updatedAt: Date.now() });
