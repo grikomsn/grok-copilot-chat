@@ -30,7 +30,7 @@ import { grokModelCost, modelPricingFields } from "./models/pricing";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
 import { AutoSignInGate } from "./auth/auto-signin";
 import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
-import { resolveWorkspaceProfiles, type ProfileResolution } from "./workspace-binding";
+import { resolveWorkspaceProfiles, resolveWorkspaceProfilesQuietly, type ProfileResolution } from "./workspace-binding";
 import {
   XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
@@ -149,25 +149,36 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
    *
    * A workspace binding pins the current repository to an account, so it wins
    * over the account the user last selected for usage and management. The
-   * bound profile is derived from the workspace and is never persisted, so a
-   * repository cannot repoint the account used in an unrelated workspace.
+   * binding is resolved on demand rather than cached, so a management command
+   * never acts on a stale account after the binding changed. It is never
+   * persisted, so a repository cannot repoint the account used in an unrelated
+   * workspace.
    */
   getEffectiveProfile(): string {
-    return this.boundProfile ?? this.activeProfile;
+    return this.workspaceBindingProfile() ?? this.activeProfile;
+  }
+
+  /**
+   * The account the current workspace is bound to, if any.
+   *
+   * The binding is derived from the default entry so that one entry's binding
+   * cannot overwrite another's.
+   */
+  private workspaceBindingProfile(): string | undefined {
+    const resolved = resolveWorkspaceProfilesQuietly(DEFAULT_XAI_PROFILE);
+    return resolved.workspace.bound ? resolved.workspace.profile : undefined;
   }
 
   /**
    * Resolves the profile a Manage Language Models entry should use.
    *
    * The entry's own profile is the baseline. A workspace binding can pin a
-   * repository to a different account. The bound profile is derived from the
-   * default entry so that one entry's binding cannot overwrite another's.
+   * repository to a different account.
    */
   private resolveBinding(entryProfile: string): ProfileResolution {
     const resolved = resolveWorkspaceProfiles(entryProfile);
-    const bound = resolved.workspace.bound ? resolved.workspace.profile : undefined;
-    if (this.boundProfile !== bound) {
-      this.boundProfile = bound;
+    if (this.boundProfile !== this.workspaceBindingProfile()) {
+      this.boundProfile = this.workspaceBindingProfile();
       this.changeEmitter.fire();
     }
     return resolved.entry;

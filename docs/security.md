@@ -6,7 +6,7 @@ Access and refresh tokens are stored per named profile in VS Code `SecretStorage
 
 Expired access tokens are refreshed automatically with a separate refresh lock per profile, including refresh-token rotation when xAI returns a replacement.
 
-A workspace binding selects which stored profile a repository uses. It only names a profile ID, so no token is ever written to workspace settings, and each profile keeps its own secret. Because a repository controls its own settings, folder and workspace bindings are only honoured in a workspace VS Code trusts; an untrusted workspace cannot move requests to a different account. The user scope is always honoured because the user controls it, and `grokCopilot.workspaceBinding` can turn workspace bindings off entirely.
+A workspace binding selects which stored profile a repository uses. It only names a profile ID, so no token is ever written to workspace settings, and each profile keeps its own secret. Because a repository controls its own settings, folder and workspace bindings are only honoured in a workspace VS Code trusts; an untrusted workspace cannot move requests to a different account. The `grokCopilot.workspaceBinding` mode is read from the user settings only, so a repository cannot relax the trust gate for itself or undo a user who turned bindings off. The user scope is always honoured because the user controls it.
 
 The extension signs in with RFC 8628 device authorization using xAI's public Grok CLI OAuth client configuration. No client secret is embedded in the extension, and no local callback server is opened.
 

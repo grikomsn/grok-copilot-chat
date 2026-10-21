@@ -45,6 +45,8 @@ The setting is resource scoped, so it also accepts a folder setting or a `.code-
 
 `grokCopilot.workspaceBinding` controls this. `trusted` (the default) only honours folder and workspace bindings in a trusted workspace, `on` always honours them, and `off` ignores them entirely.
 
+The mode itself is only read from the user settings. A repository cannot set `grokCopilot.workspaceBinding` to relax the trust gate for itself, and it cannot undo a user who set it to `off`.
+
 A binding changes which account the Grok models use in the current repository. It does not change the account of a chat that is already running, and it does not move tokens: every profile keeps its own stored session, usage, and model catalog.
 
 Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker and default to High. Models also expose a **Web Search** toggle; it is off by default, routes enabled requests through xAI's Responses API, and overrides the `grokCopilot.webSearch` workspace default for that request. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a reasoning picker because their legacy contracts do not accept the current reasoning parameter.

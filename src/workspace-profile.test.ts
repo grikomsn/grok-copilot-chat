@@ -149,3 +149,23 @@ test("keeps the workspace binding stable when a named entry resolves too", () =>
   // The default entry still resolves to the same workspace binding.
   assert.equal(resolveProfileBinding("default", scopes, { trusted: true }).profile, "work");
 });
+
+test("treats the profile IDs 'unset' and 'invalid' as ordinary profiles", () => {
+  // These are valid profile IDs, so they must not collide with the
+  // unset and invalid sentinels used by the classifier.
+  const unset = resolveProfileBinding("default", [{ folder: "unset" }], { trusted: true });
+  assert.equal(unset.profile, "unset");
+  assert.equal(unset.source, "folder");
+  assert.equal(unset.bound, true);
+  assert.deepEqual(unset.invalid, []);
+
+  const invalid = resolveProfileBinding("default", [{ folder: "invalid" }], { trusted: true });
+  assert.equal(invalid.profile, "invalid");
+  assert.equal(invalid.source, "folder");
+  assert.equal(invalid.bound, true);
+  assert.deepEqual(invalid.invalid, []);
+
+  const mapped = resolveProfileBinding("default", [{ folderMap: { default: "invalid" } }], { trusted: true });
+  assert.equal(mapped.profile, "invalid");
+  assert.deepEqual(mapped.invalid, []);
+});

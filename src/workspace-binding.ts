@@ -27,12 +27,13 @@ export type WorkspaceBindingMode = "off" | "on" | "trusted";
  * enables it even in an untrusted workspace, and `trusted` (the default) only
  * honours bindings from workspaces the user trusts.
  *
- * The setting is resource scoped, so it is read with a folder resource when
- * one is open. VS Code warns when a resource scoped setting is read without
- * a resource.
+ * The mode is only read from the user scope. A repository must not be able to
+ * relax the trust gate for itself, so a workspace or folder value for this
+ * setting is ignored.
  */
 export function bindingModeFromConfiguration(configuration: vscode.WorkspaceConfiguration): WorkspaceBindingMode {
-  const value = configuration.get<string>(BINDING_SETTING, "trusted");
+  const inspected = configuration.inspect<string>(BINDING_SETTING);
+  const value = inspected?.globalValue;
   return value === "off" || value === "on" || value === "trusted" ? value : "trusted";
 }
 
@@ -103,6 +104,8 @@ export interface WorkspaceProfileResolution {
    * overwrite another's.
    */
   readonly workspace: ProfileResolution;
+  /** Bindings whose configured value was not a valid profile ID. */
+  readonly invalid: readonly ProfileBindingSource[];
 }
 
 /**
@@ -111,8 +114,27 @@ export interface WorkspaceProfileResolution {
  * The entry's own profile is the baseline. A per-entry mapping or a
  * workspace binding overrides it so a repository can pin its account, and a
  * user binding acts as the default account for entries that do not name one.
+ *
+ * Invalid values are reported once per resolution. Callers that poll this
+ * function should use {@link resolveWorkspaceProfilesQuietly} so the warning
+ * is not repeated on every call.
  */
 export function resolveWorkspaceProfiles(entryProfile: string): WorkspaceProfileResolution {
+  const resolved = resolveWorkspaceProfilesQuietly(entryProfile);
+  if (resolved.invalid.length) {
+    const sources = resolved.invalid.map((source) => `grokCopilot.${PROFILE_SETTING} (${source})`).join(", ");
+    void vscode.window.showWarningMessage(
+      `Ignoring an invalid xAI Grok profile binding in ${sources}. Profile IDs use letters, numbers, dots, underscores, or hyphens.`,
+    );
+  }
+  return { entry: resolved.entry, workspace: resolved.workspace, invalid: resolved.invalid };
+}
+
+/**
+ * Resolves the xAI profiles for the current workspace without reporting
+ * invalid values. Used by callers that resolve on every read.
+ */
+export function resolveWorkspaceProfilesQuietly(entryProfile: string): WorkspaceProfileResolution {
   const configuration = vscode.workspace.getConfiguration("grokCopilot", configurationScope());
   const mode = bindingModeFromConfiguration(configuration);
   const scopes = readProfileScopes();
@@ -120,13 +142,11 @@ export function resolveWorkspaceProfiles(entryProfile: string): WorkspaceProfile
   const entry = resolveProfileBinding(entryProfile, scopes, { trusted });
   const workspace = resolveProfileBinding(DEFAULT_XAI_PROFILE, scopes, { trusted });
   const invalid = [...new Set([...entry.invalid, ...workspace.invalid])];
-  if (invalid.length) {
-    const sources = invalid.map((source) => `grokCopilot.${PROFILE_SETTING} (${source})`).join(", ");
-    void vscode.window.showWarningMessage(
-      `Ignoring an invalid xAI Grok profile binding in ${sources}. Profile IDs use letters, numbers, dots, underscores, or hyphens.`,
-    );
-  }
-  return { entry: { ...entry, invalid }, workspace: { ...workspace, invalid } };
+  return {
+    entry: { ...entry, invalid },
+    workspace: { ...workspace, invalid },
+    invalid,
+  };
 }
 
 /**

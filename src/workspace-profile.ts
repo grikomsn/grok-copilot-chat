@@ -38,17 +38,29 @@ export interface ProfileResolution {
   readonly invalid: readonly ProfileBindingSource[];
 }
 
-type Classified = "unset" | "invalid" | string;
+type Classified =
+  | { readonly kind: "unset" }
+  | { readonly kind: "invalid" }
+  | { readonly kind: "profile"; readonly id: string };
 
-/** Classifies a configured binding value without throwing on malformed input. */
+const UNSET: Classified = { kind: "unset" };
+const INVALID: Classified = { kind: "invalid" };
+
+/**
+ * Classifies a configured binding value without throwing on malformed input.
+ *
+ * The result is tagged rather than a bare string because `unset` and
+ * `invalid` are valid profile IDs, so a plain string result would collide
+ * with the sentinels.
+ */
 function classify(value: unknown): Classified {
-  if (typeof value !== "string") return "unset";
+  if (typeof value !== "string") return UNSET;
   const trimmed = value.trim();
-  if (!trimmed) return "unset";
+  if (!trimmed) return UNSET;
   try {
-    return normalizeProfileId(trimmed);
+    return { kind: "profile", id: normalizeProfileId(trimmed) };
   } catch {
-    return "invalid";
+    return INVALID;
   }
 }
 
@@ -81,12 +93,12 @@ export function classifyProfileMap(
       continue;
     }
     const classified = classify(raw);
-    if (classified === "invalid") {
+    if (classified.kind === "invalid") {
       invalid = true;
       continue;
     }
-    if (classified === "unset") continue;
-    overrides[entry] = classified;
+    if (classified.kind === "unset") continue;
+    overrides[entry] = classified.id;
   }
   return { overrides, invalid };
 }
@@ -131,12 +143,12 @@ export function resolveProfileBinding(
       const override = map[entry];
       if (override === undefined) continue;
       const classified = classify(override);
-      if (classified === "invalid") {
+      if (classified.kind === "invalid") {
         note(source);
         continue;
       }
-      if (classified === "unset") continue;
-      return { profile: classified, source, bound: true, invalid };
+      if (classified.kind === "unset") continue;
+      return { profile: classified.id, source, bound: true, invalid };
     }
   }
 
@@ -151,12 +163,12 @@ export function resolveProfileBinding(
     if (source !== "user" && !options.trusted) continue;
     for (const scope of scopes) {
       const classified = classify(scope[key]);
-      if (classified === "invalid") {
+      if (classified.kind === "invalid") {
         note(source);
         continue;
       }
-      if (classified === "unset") continue;
-      return { profile: classified, source, bound: true, invalid };
+      if (classified.kind === "unset") continue;
+      return { profile: classified.id, source, bound: true, invalid };
     }
   }
 

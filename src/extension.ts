@@ -40,9 +40,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     provider.onDidChangeActiveProfile((profile) => {
       void context.globalState.update(ACTIVE_PROFILE_STATE_KEY, profile);
+      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
     }),
     provider.onDidChangeUsage(({ profile, usage }) => {
-      if (profile === provider.getEffectiveProfile()) renderUsageStatus(usageStatus, usage);
+      if (profile === provider.getEffectiveProfile()) {
+        renderUsageStatus(usageStatus, usage, provider.getEffectiveProfile());
+      }
       updateUsageStatusVisibility(usageStatus);
       void context.globalState.update(USAGE_STATE_KEY, provider.getUsageSnapshots());
     }),

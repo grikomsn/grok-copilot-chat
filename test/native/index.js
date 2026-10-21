@@ -150,15 +150,16 @@ async function validateWorkspaceBinding(provider, oauth, source) {
     assert.equal(mapped[0].id, "default::grok-4.6");
     assert.equal(scopedProvider.getEffectiveProfile(), "default");
 
-    // Turning the binding off restores the entry's own account.
-    await configuration.update("workspaceBinding", "off", vscode.ConfigurationTarget.WorkspaceFolder);
+    // Turning the binding off restores the entry's own account. The mode is
+    // read from the user scope only, so a folder value cannot turn it off.
+    await configuration.update("workspaceBinding", "off", vscode.ConfigurationTarget.Global);
     const disabled = await scopedProvider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "work" } }, source.token);
     assert.equal(disabled[0].id, "work::grok-4.6");
     assert.equal(scopedProvider.getEffectiveProfile(), "default");
   } finally {
     await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
     await configuration.update("profileMap", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
-    await configuration.update("workspaceBinding", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    await configuration.update("workspaceBinding", undefined, vscode.ConfigurationTarget.Global);
   }
 }
 module.exports = { run };

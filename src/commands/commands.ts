@@ -98,7 +98,7 @@ async function manage(
     ].join("\n");
     const action = await vscode.window.showInformationMessage(detail, "Manage Language Models");
     if (action === "Manage Language Models") await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
-  } else if (picked.action === "signin") await signIn(oauth, provider, output, profile);
+  } else if (picked.action === "signin") await signIn(oauth, provider, output, effective);
   else if (picked.action === "switch") await selectProfile(oauth, provider);
   else if (picked.action === "bind") await bindAccountToWorkspace(oauth, provider);
   else if (picked.action === "add") await addAccount(oauth, provider, output);
@@ -109,11 +109,13 @@ async function manage(
   else if (picked.action === "logs") output.show(true);
   else if (picked.action === "test") await testConnection(provider, output);
   else if (picked.action === "signout") {
-    await oauth.signOut(profile);
-    provider.clearUsage(profile);
+    // Sign out of the account the menu named, which is the bound account when
+    // the workspace is bound.
+    await oauth.signOut(effective);
+    provider.clearUsage(effective);
     usageStatus.hide();
     provider.fireDidChange();
-    vscode.window.showInformationMessage(`Signed out of xAI profile “${profile}”.`);
+    vscode.window.showInformationMessage(`Signed out of xAI profile “${effective}”.`);
   }
 }
 
@@ -341,8 +343,10 @@ async function testConnection(provider: GrokProvider, output: vscode.OutputChann
 }
 
 async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): Promise<void> {
-  const profile = provider.getActiveProfile();
-  let snapshot = provider.getUsageSnapshot();
+  // The usage popup reports the account the workspace is bound to, because
+  // that is the account the refreshed snapshot belongs to.
+  const profile = provider.getEffectiveProfile();
+  let snapshot = provider.getUsageSnapshot(profile);
   try {
     snapshot = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Window, title: "Refreshing Grok usage…" },
