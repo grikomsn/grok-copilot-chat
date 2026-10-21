@@ -49,7 +49,7 @@ The mode itself is only read from the user settings. A repository cannot set `gr
 
 A binding changes which account the Grok models use in the current repository. It does not change the account a chat is already running with, and it does not move tokens: every profile keeps its own stored session, usage, and model catalog.
 
-A binding also does not change the account **Grok: Select Profile for Usage and Management** uses. That choice stays the user's own, so a repository cannot become the account used in an unrelated workspace.
+A binding only routes chat requests. **Grok: Select Profile for Usage and Management** still chooses the account that the usage, status bar, and management commands use, and that choice is the user's own: a repository cannot become the account used in an unrelated workspace. When a workspace is bound, the Manage dialog names both accounts so it is clear which one a command acts on.
 
 Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker and default to High. Models also expose a **Web Search** toggle; it is off by default, routes enabled requests through xAI's Responses API, and overrides the `grokCopilot.webSearch` workspace default for that request. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a reasoning picker because their legacy contracts do not accept the current reasoning parameter.
 

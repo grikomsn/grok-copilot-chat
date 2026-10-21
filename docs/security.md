@@ -8,7 +8,7 @@ Expired access tokens are refreshed automatically with a separate refresh lock p
 
 A workspace binding selects which stored profile a repository uses. It only names a profile ID, so no token is ever written to workspace settings, and each profile keeps its own secret. Because a repository controls its own settings, folder and workspace bindings are only honoured in a workspace VS Code trusts; an untrusted workspace cannot move requests to a different account. The `grokCopilot.workspaceBinding` mode is read from the user settings only, so a repository cannot relax the trust gate for itself or undo a user who turned bindings off. The user scope is always honoured because the user controls it.
 
-A binding is not persisted as the active account. The account the user selects with **Grok: Select Profile for Usage and Management** stays their own choice, so opening a repository that carries a binding cannot change the account used in an unrelated workspace.
+A binding is not persisted as the active account. The account the user selects with **Grok: Select Profile for Usage and Management** stays their own choice, so opening a repository that carries a binding cannot change the account used in an unrelated workspace. A binding routes chat requests only; usage and management commands keep using the account the user selected, so a repository cannot read or spend the usage of another account.
 
 The extension signs in with RFC 8628 device authorization using xAI's public Grok CLI OAuth client configuration. No client secret is embedded in the extension, and no local callback server is opened.
 

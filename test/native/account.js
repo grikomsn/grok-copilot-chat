@@ -5,12 +5,11 @@ const { XaiOAuth, XAI_SESSION_SECRET } = require("../../out/auth/oauth");
 const { signInSelection } = require("../../out/auth/selection");
 
 /**
- * Validates that a workspace binding routes requests to the bound account
- * without changing the account the user selected for usage and management.
+ * Validates the account separation a workspace binding creates.
  *
- * The sign-in rule is checked here as well, because a binding that repoints
- * the requests must not repoint the user's account, while a sign-in the user
- * asked for by name still selects it.
+ * A binding routes chat requests to the bound account. Usage and management
+ * keep using the account the user selected, so a repository cannot reach
+ * another account's usage or spend.
  */
 async function run() {
   const folder = vscode.workspace.workspaceFolders?.[0];
@@ -43,11 +42,18 @@ async function run() {
     const models = await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, {});
     assert.equal(models[0].id, "work::grok-4.6", "the binding must route requests to the work account");
 
-    // The bound account is used for requests, but the user's own choice for
-    // usage and management is untouched.
+    // Requests use the bound account.
     assert.equal(provider.getEffectiveProfile(), "work");
-    assert.equal(provider.getActiveProfile(), "default", "a binding must not change the user's active account");
     assert.equal(provider.isWorkspaceBound(), true);
+
+    // Usage and management keep using the account the user selected.
+    assert.equal(provider.getActiveProfile(), "default", "a binding must not change the user's active account");
+    // The bound account keeps its own usage, but it is not the usage the
+    // status bar and the usage popup report.
+    provider.clearUsage("work");
+    assert.equal(provider.getUsageSnapshot().updatedAt, undefined, "usage must not report the bound account");
+    assert.deepEqual(provider.getUsageSnapshot("work"), {}, "the bound account keeps its own usage slot");
+    assert.deepEqual(provider.getUsageSnapshots(), { work: {} }, "each account keeps its own usage");
 
     // A sign-in for the bound account keeps the user's own account.
     assert.equal(signInSelection(provider.isWorkspaceBound(), false), "keep");
@@ -66,6 +72,6 @@ async function run() {
     await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
     globalThis.fetch = previousFetch;
   }
-  console.log(JSON.stringify({ provider: "grok", accountChecks: "a binding routes requests without changing the user's active account, and the sign-in rule keeps an explicit selection", passed: true }));
+  console.log(JSON.stringify({ provider: "grok", accountChecks: "a binding routes requests while usage and management keep the user's account, and the sign-in rule keeps an explicit selection", passed: true }));
 }
 module.exports = { run };

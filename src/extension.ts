@@ -28,7 +28,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const usageStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   usageStatus.name = "Grok usage and API activity";
   usageStatus.command = "grokCopilot.showUsage";
-  renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
+  renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getActiveProfile());
   updateUsageStatusVisibility(usageStatus);
 
   context.subscriptions.push(
@@ -40,11 +40,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     provider.onDidChangeActiveProfile((profile) => {
       void context.globalState.update(ACTIVE_PROFILE_STATE_KEY, profile);
-      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
+      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getActiveProfile());
     }),
     provider.onDidChangeUsage(({ profile, usage }) => {
-      if (profile === provider.getEffectiveProfile()) {
-        renderUsageStatus(usageStatus, usage, provider.getEffectiveProfile());
+      if (profile === provider.getActiveProfile()) {
+        renderUsageStatus(usageStatus, usage, provider.getActiveProfile());
       }
       updateUsageStatusVisibility(usageStatus);
       void context.globalState.update(USAGE_STATE_KEY, provider.getUsageSnapshots());
@@ -70,18 +70,18 @@ export function activate(context: vscode.ExtensionContext): void {
       ) {
         provider.clearModelCache();
         provider.fireDidChange();
-        renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
+        renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getActiveProfile());
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       provider.clearModelCache();
       provider.fireDidChange();
-      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
+      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getActiveProfile());
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
       provider.clearModelCache();
       provider.fireDidChange();
-      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
+      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getActiveProfile());
     }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     ...registerCommands(oauth, provider, output, usageStatus),

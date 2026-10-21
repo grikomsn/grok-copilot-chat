@@ -14,11 +14,11 @@ export function registerCommands(
   usageStatus: vscode.StatusBarItem,
 ): vscode.Disposable[] {
   return [
-    vscode.commands.registerCommand("grokCopilot.signIn", () => signIn(oauth, provider, output, provider.getEffectiveProfile())),
+    vscode.commands.registerCommand("grokCopilot.signIn", () => signIn(oauth, provider, output, provider.getActiveProfile(), { explicit: true })),
     vscode.commands.registerCommand("grokCopilot.addAccount", () => addAccount(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.configureEntry", () => configureEntry(oauth, provider, output)),
-    provider.onSignInRequested((profile) => {
-      void autoSignInForProfile(oauth, provider, output, profile);
+    provider.onSignInRequested((request) => {
+      void autoSignInForProfile(oauth, provider, output, request.profile, request.explicit);
     }),
     vscode.commands.registerCommand("grokCopilot.selectProfile", () => selectProfile(oauth, provider)),
     vscode.commands.registerCommand("grokCopilot.bindAccountToWorkspace", () => bindAccountToWorkspace(oauth, provider)),
@@ -42,6 +42,7 @@ async function autoSignInForProfile(
   provider: GrokProvider,
   output: vscode.OutputChannel,
   profile: string,
+  explicit: boolean,
 ): Promise<void> {
   if (await oauth.hasSession(profile)) return;
   const action = await vscode.window.showInformationMessage(
@@ -49,8 +50,9 @@ async function autoSignInForProfile(
     "Sign in",
     "Later",
   );
-  // The entry was created by the user, so signing in to it selects it.
-  if (action === "Sign in") await signIn(oauth, provider, output, profile, { explicit: true });
+  // An entry the user created is selected by signing in to it. A profile a
+  // workspace binding selected was not the user's choice, so it is not.
+  if (action === "Sign in") await signIn(oauth, provider, output, profile, { explicit });
 }
 
 async function manage(
@@ -62,7 +64,9 @@ async function manage(
   const profile = provider.getActiveProfile();
   const effective = provider.getEffectiveProfile();
   const bound = effective !== profile;
-  const signedIn = await oauth.hasSession(effective);
+  // Usage and management use the account the user selected. A binding only
+  // routes chat requests, so it does not take over these commands.
+  const signedIn = await oauth.hasSession(profile);
   const bindChoice = { label: "$(folder) Bind account to this workspace", action: "bind" };
   const choices = signedIn
     ? [
@@ -88,7 +92,7 @@ async function manage(
       ];
   const picked = await vscode.window.showQuickPick(choices, {
     title: bound
-      ? `xAI Grok [${effective} — bound to this workspace] — ${signedIn ? "signed in" : "not signed in"}`
+      ? `xAI Grok [${profile}] — ${signedIn ? "signed in" : "not signed in"} — requests use ${effective}`
       : `xAI Grok [${profile}] — ${signedIn ? "signed in" : "not signed in"}`,
   });
   if (!picked) return;
@@ -100,7 +104,7 @@ async function manage(
     ].join("\n");
     const action = await vscode.window.showInformationMessage(detail, "Manage Language Models");
     if (action === "Manage Language Models") await vscode.commands.executeCommand("workbench.action.chat.manageLanguageModels");
-  } else if (picked.action === "signin") await signIn(oauth, provider, output, effective);
+  } else if (picked.action === "signin") await signIn(oauth, provider, output, profile, { explicit: true });
   else if (picked.action === "switch") await selectProfile(oauth, provider);
   else if (picked.action === "bind") await bindAccountToWorkspace(oauth, provider);
   else if (picked.action === "add") await addAccount(oauth, provider, output);
@@ -111,13 +115,13 @@ async function manage(
   else if (picked.action === "logs") output.show(true);
   else if (picked.action === "test") await testConnection(provider, output);
   else if (picked.action === "signout") {
-    // Sign out of the account the menu named, which is the bound account when
-    // the workspace is bound.
-    await oauth.signOut(effective);
-    provider.clearUsage(effective);
+    // Sign out of the account the menu named, which is the account the user
+    // selected for usage and management.
+    await oauth.signOut(profile);
+    provider.clearUsage(profile);
     usageStatus.hide();
     provider.fireDidChange();
-    vscode.window.showInformationMessage(`Signed out of xAI profile “${effective}”.`);
+    vscode.window.showInformationMessage(`Signed out of xAI profile “${profile}”.`);
   }
 }
 
@@ -355,9 +359,9 @@ async function testConnection(provider: GrokProvider, output: vscode.OutputChann
 }
 
 async function showUsage(provider: GrokProvider, output: vscode.OutputChannel): Promise<void> {
-  // The usage popup reports the account the workspace is bound to, because
-  // that is the account the refreshed snapshot belongs to.
-  const profile = provider.getEffectiveProfile();
+  // The usage popup reports the account the user selected for usage and
+  // management. A workspace binding only routes chat requests.
+  const profile = provider.getActiveProfile();
   let snapshot = provider.getUsageSnapshot(profile);
   try {
     snapshot = await vscode.window.withProgress(
