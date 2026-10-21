@@ -61,7 +61,8 @@ export function activate(context: vscode.ExtensionContext): void {
         updateUsageStatusVisibility(usageStatus);
       }
       // A workspace binding change can move this repository to another xAI
-      // account, so the model list has to be resolved again.
+      // account, so the model list has to be resolved again and the status
+      // bar has to name the new account.
       if (
         event.affectsConfiguration("grokCopilot.profile")
         || event.affectsConfiguration("grokCopilot.profileMap")
@@ -69,15 +70,18 @@ export function activate(context: vscode.ExtensionContext): void {
       ) {
         provider.clearModelCache();
         provider.fireDidChange();
+        renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       provider.clearModelCache();
       provider.fireDidChange();
+      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => {
       provider.clearModelCache();
       provider.fireDidChange();
+      renderUsageStatus(usageStatus, provider.getUsageSnapshot(), provider.getEffectiveProfile());
     }),
     vscode.lm.registerLanguageModelChatProvider("xai-grok", provider),
     ...registerCommands(oauth, provider, output, usageStatus),

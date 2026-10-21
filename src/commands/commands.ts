@@ -13,7 +13,7 @@ export function registerCommands(
   usageStatus: vscode.StatusBarItem,
 ): vscode.Disposable[] {
   return [
-    vscode.commands.registerCommand("grokCopilot.signIn", () => signIn(oauth, provider, output, provider.getActiveProfile())),
+    vscode.commands.registerCommand("grokCopilot.signIn", () => signIn(oauth, provider, output, provider.getEffectiveProfile())),
     vscode.commands.registerCommand("grokCopilot.addAccount", () => addAccount(oauth, provider, output)),
     vscode.commands.registerCommand("grokCopilot.configureEntry", () => configureEntry(oauth, provider, output)),
     provider.onSignInRequested((profile) => {
@@ -150,7 +150,10 @@ async function signIn(
       },
     );
     provider.clearUsage(profile);
-    provider.setActiveProfile(profile);
+    // A workspace binding owns the account for this repository, so signing in
+    // to it must not change the account the user selected globally. The
+    // persisted active profile stays the user's own choice.
+    if (profile === provider.getActiveProfile()) provider.setActiveProfile(profile);
     const models = await provider.refreshModels(profile);
     void provider.refreshUsage(profile).catch((error) => output.appendLine(`[activity] post-sign-in refresh failed: ${messageOf(error)}`));
     vscode.window.showInformationMessage(`Signed in to xAI profile “${profile}”. Found ${models.length} Grok models.`);
@@ -265,10 +268,11 @@ async function selectProfile(oauth: XaiOAuth, provider: GrokProvider): Promise<v
   );
   if (!picked) return;
   provider.setActiveProfile(picked.profile);
-  const choose = await vscode.window.showInformationMessage(
-    `xAI Grok profile “${picked.profile}” is now active for usage and management. Chat requests keep using the account attached to the selected model entry.`,
-    "Choose Chat Model",
-  );
+  const bound = provider.getEffectiveProfile() !== picked.profile;
+  const message = bound
+    ? `xAI Grok profile “${picked.profile}” is now active for usage and management. This workspace stays bound to “${provider.getEffectiveProfile()}”, so its requests keep using that account.`
+    : `xAI Grok profile “${picked.profile}” is now active for usage and management. Chat requests keep using the account attached to the selected model entry.`;
+  const choose = await vscode.window.showInformationMessage(message, "Choose Chat Model");
   if (choose === "Choose Chat Model") await vscode.commands.executeCommand("workbench.action.chat.openModelPicker");
 }
 

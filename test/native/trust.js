@@ -49,15 +49,25 @@ async function run() {
     assert.equal(bindingModeFromConfiguration(configuration), "trusted", "the folder value must not relax the trust gate");
 
     // Because the workspace is untrusted, the folder binding is ignored.
-    if (!trusted) {
-      const models = await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, {});
-      assert.equal(models[0].id, "default::grok-4.6", "an untrusted workspace must not repoint the account");
-      assert.equal(provider.getEffectiveProfile(), "default");
-    }
+    // This probe only means something in an untrusted workspace, so it fails
+    // rather than skipping when the workspace is trusted.
+    assert.equal(trusted, false, "this probe must run in an untrusted workspace");
+    const models = await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, {});
+    assert.equal(models[0].id, "default::grok-4.6", "an untrusted workspace must not repoint the account");
+    assert.equal(provider.getEffectiveProfile(), "default");
+
+    // A user-scoped "on" is the only way to honour a repository binding in an
+    // untrusted workspace, and it has to come from the user settings.
+    await configuration.update("workspaceBinding", "on", vscode.ConfigurationTarget.Global);
+    assert.equal(bindingModeFromConfiguration(configuration), "on");
+    const allowed = await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, {});
+    assert.equal(allowed[0].id, "work::grok-4.6", "a user opt-in must allow the repository binding");
 
     // A user-scoped "off" cannot be overridden by a repository either.
     await configuration.update("workspaceBinding", "off", vscode.ConfigurationTarget.Global);
     assert.equal(bindingModeFromConfiguration(configuration), "off", "a user value must win over a folder value");
+    const denied = await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, {});
+    assert.equal(denied[0].id, "default::grok-4.6", "a user opt-out must ignore the repository binding");
     await configuration.update("workspaceBinding", undefined, vscode.ConfigurationTarget.Global);
   } finally {
     await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
