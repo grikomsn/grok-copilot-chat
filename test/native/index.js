@@ -104,7 +104,62 @@ async function run() {
     const reporter = new StreamResponseReporter({ report: (part) => generated.push(part) }, vscode, "native");
     reporter.report({ toolCalls: [{ id: "", name: "probe", arguments: "{}" }, { id: "", name: "probe", arguments: "{}" }] });
     assert.equal(new Set(generated.map((part) => part.callId)).size, 2);
+    await validateWorkspaceBinding(provider, oauth, source);
   } finally { globalThis.fetch = previousFetch; source.dispose(); }
-  console.log(JSON.stringify({ provider: "grok", nativeChecks: "parallel tools in both protocols, follow-up, reasoning closure, cancellation, EOF error, 401 refresh, two profiles, reconciliation", passed: true }));
+  console.log(JSON.stringify({ provider: "grok", nativeChecks: "parallel tools in both protocols, follow-up, reasoning closure, cancellation, EOF error, 401 refresh, two profiles, reconciliation, workspace account binding", passed: true }));
+}
+
+/**
+ * Validates that a resource-scoped setting can pin the current workspace to a
+ * different xAI account, using the real VS Code configuration service.
+ */
+async function validateWorkspaceBinding(provider, oauth, source) {
+  const values = new Map();
+  const store = { keys: async () => [...values.keys()], get: async (key) => values.get(key),
+    store: async (key, value) => { values.set(key, value); }, delete: async (key) => { values.delete(key); } };
+  for (const profile of ["default", "work"]) await store.store(profile === "default" ? XAI_SESSION_SECRET : `${XAI_SESSION_SECRET}.${profile}`,
+    JSON.stringify({ accessToken: `synthetic-${profile}`, refreshToken: "synthetic-refresh", expiresAt: Date.now() + 3600000 }));
+  const scoped = new XaiOAuth(store, { fetch: async () => Response.json({ access_token: "synthetic-refreshed", refresh_token: "synthetic-refresh", expires_in: 3600 }) });
+  const stateValues = new Map();
+  const state = { get: (key) => stateValues.get(key), update: async (key, value) => { stateValues.set(key, value); } };
+  const scopedProvider = new GrokProvider(scoped, { appendLine() {} }, {}, state);
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  assert.ok(folder, "native probe needs a workspace folder to scope settings");
+  const configuration = vscode.workspace.getConfiguration("grokCopilot", folder.uri);
+  try {
+    // Without a binding the entry keeps its own account.
+    const unbound = await scopedProvider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, source.token);
+    assert.equal(unbound[0].id, "default::grok-4.6");
+    assert.equal(scopedProvider.getEffectiveProfile(), "default");
+
+    // A folder-scoped binding moves the default entry to another account.
+    await configuration.update("profile", "work", vscode.ConfigurationTarget.WorkspaceFolder);
+    const bound = await scopedProvider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "default" } }, source.token);
+    assert.equal(bound[0].id, "work::grok-4.6");
+    assert.equal(scopedProvider.getEffectiveProfile(), "work");
+    assert.equal(bound[0].detail, "xAI OAuth · work");
+
+    // An explicitly named entry is not repointed by the shorthand binding.
+    const named = await scopedProvider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "work" } }, source.token);
+    assert.equal(named[0].id, "work::grok-4.6");
+
+    // A per-entry mapping repoints an explicitly named entry.
+    await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    await configuration.update("profileMap", { work: "default" }, vscode.ConfigurationTarget.WorkspaceFolder);
+    const mapped = await scopedProvider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "work" } }, source.token);
+    assert.equal(mapped[0].id, "default::grok-4.6");
+    assert.equal(scopedProvider.getEffectiveProfile(), "default");
+
+    // Turning the binding off restores the entry's own account. The mode is
+    // read from the user scope only, so a folder value cannot turn it off.
+    await configuration.update("workspaceBinding", "off", vscode.ConfigurationTarget.Global);
+    const disabled = await scopedProvider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "work" } }, source.token);
+    assert.equal(disabled[0].id, "work::grok-4.6");
+    assert.equal(scopedProvider.getEffectiveProfile(), "default");
+  } finally {
+    await configuration.update("profile", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    await configuration.update("profileMap", undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+    await configuration.update("workspaceBinding", undefined, vscode.ConfigurationTarget.Global);
+  }
 }
 module.exports = { run };

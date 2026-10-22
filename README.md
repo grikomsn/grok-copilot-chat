@@ -31,6 +31,7 @@ This native VS Code `LanguageModelChatProvider` authenticates with xAI, discover
 1. Install [Grok for GitHub Copilot Chat](https://marketplace.visualstudio.com/items?itemName=grikomsn.grok-copilot-chat). You need VS Code 1.125 or newer, GitHub Copilot Chat, and an xAI account with API access or an eligible subscription.
 2. Open **Manage Language Models**, choose **Add Models**, select **xAI Grok**, and follow the prompts (group name and profile ID). Grok then offers to sign in right away — or run **Grok: Add Provider Entry** (or **Grok: Add xAI Account**) yourself; each creates the entry if missing and signs in only when needed.
 3. Repeat those steps for another xAI account, then enable the Grok models you want in Copilot Chat.
+4. To pin a repository to one of those accounts, run **Grok: Bind Account to This Workspace**, or set `"grokCopilot.profile": "work"` in `.vscode/settings.json`.
 
 Composer controls override workspace defaults; reasoning defaults to High when supported and Web Search remains off until enabled. Click the Grok status-bar item to inspect locally tracked spend and tokens, transient API capacity, and any subscription snapshot exposed by the account.
 

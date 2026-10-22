@@ -15,6 +15,42 @@ A paid Copilot plan is not required for a bring-your-own-key language model prov
 3. Repeat those steps with a different profile ID to add another xAI account. Sign-ins are sequential per profile; the device-code authorization opens xAI's verification page with the user code pre-filled.
 4. Enable the models you want and select one in Copilot Chat. Usage, refresh state, and the live model catalog follow the selected profile. The profile field defaults to `default`. Every model ID is qualified by its profile, including `default`. After upgrading from 0.x, reselect your Grok model in a new chat; unqualified model IDs and old singleton usage snapshots are no longer supported.
 
+## Bind an account to a workspace
+
+A repository can be pinned to a specific xAI account. Run **Grok: Bind Account to This Workspace** and pick a signed-in profile; the binding is written to the workspace settings, so every window that opens that repository uses that account.
+
+To do it by hand, set `grokCopilot.profile` in `.vscode/settings.json`:
+
+```json
+{
+  "grokCopilot.profile": "work"
+}
+```
+
+The setting is resource scoped, so it also accepts a folder setting or a `.code-workspace` value. It repoints the entry named `default`. To repoint an entry that names another profile, use `grokCopilot.profileMap`:
+
+```json
+{
+  "grokCopilot.profileMap": {
+    "work": "personal"
+  }
+}
+```
+
+| Scope | Honoured in an untrusted workspace | Notes |
+| --- | --- | --- |
+| Folder (`.vscode/settings.json`) | No | Controlled by the repository, so it is only read in a workspace VS Code trusts |
+| Workspace (`.code-workspace`) | No | Same rule as the folder scope |
+| User (`settings.json`) | Yes | Controlled by the user |
+
+`grokCopilot.workspaceBinding` controls this. `trusted` (the default) only honours folder and workspace bindings in a trusted workspace, `on` always honours them, and `off` ignores them entirely.
+
+The mode itself is only read from the user settings. A repository cannot set `grokCopilot.workspaceBinding` to relax the trust gate for itself, and it cannot undo a user who set it to `off`.
+
+A binding changes which account the Grok models use in the current repository. It does not change the account a chat is already running with, and it does not move tokens: every profile keeps its own stored session, usage, and model catalog.
+
+A binding only routes chat requests, and it routes them for the entry it applies to. **Grok: Select Profile for Usage and Management** still chooses the account that the usage, status bar, and management commands use, and that choice is the user's own: a repository cannot become the account used in an unrelated workspace. When a workspace is bound, the Manage dialog names both accounts so it is clear which one a command acts on.
+
 Reasoning-capable models expose a native **Reasoning Effort** control in the Copilot Chat model picker and default to High. Models also expose a **Web Search** toggle; it is off by default, routes enabled requests through xAI's Responses API, and overrides the `grokCopilot.webSearch` workspace default for that request. The available reasoning choices follow the selected model: Grok 4.6 offers Low, Medium, High, and Extra High; Grok 4.5 offers Low, Medium, and High; Grok 4.3 offers None, Low, Medium, and High; Grok multi-agent models can additionally expose Extra High. Retired fast-model aliases do not expose a reasoning picker because their legacy contracts do not accept the current reasoning parameter.
 
 ## Commands
@@ -25,6 +61,7 @@ Reasoning-capable models expose a native **Reasoning Effort** control in the Cop
 | **Grok: Add Provider Entry** | Provision a Manage Language Models entry for a profile ID, then sign in only if needed |
 | **Grok: Add xAI Account** | Create or replace a named OAuth profile |
 | **Grok: Select Profile for Usage and Management** | Choose the profile used by usage and management commands; this choice is restored after restart and does not change model-entry routing |
+| **Grok: Bind Account to This Workspace** | Pin the current workspace to a signed-in xAI account |
 | **Grok: Sign In to xAI** | Authorize with an RFC 8628 device code (opens xAI's verification page with the code pre-filled) |
 | **Grok: Refresh Models** | Fetch the current model list from xAI |
 | **Grok: Test Connection** | Send a small live inference request |
@@ -50,6 +87,9 @@ The request and token values returned in xAI response headers are transient thro
 | `grokCopilot.catalogCacheMinutes` | `5` | Model metadata refresh interval |
 | `grokCopilot.debugLogging` | `false` | Log request, usage, stream, and rate-limit metadata to the Grok output channel |
 | `grokCopilot.showUsageStatusBar` | `true` | Show API activity and subscription usage in the status bar |
+| `grokCopilot.profile` | `""` | xAI profile to use in this workspace or folder; empty means the entry keeps its own profile |
+| `grokCopilot.profileMap` | `{}` | Maps Manage Language Models entry names to xAI profiles |
+| `grokCopilot.workspaceBinding` | `trusted` | Whether folder and workspace profile bindings are honoured |
 
 The authenticated xAI `/models` response remains authoritative. Fields it omits are enriched from the canonical `xai` provider in a six-hour models.dev snapshot stored in VS Code `globalState`. Stale metadata is returned immediately while refresh runs and remains available during models.dev outages.
 

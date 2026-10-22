@@ -30,6 +30,7 @@ import { grokModelCost, modelPricingFields } from "./models/pricing";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
 import { AutoSignInGate } from "./auth/auto-signin";
 import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
+import { resolveWorkspaceProfiles, resolveWorkspaceProfilesQuietly, type ProfileResolution } from "./workspace-binding";
 import {
   XAI_AUTO_TOPUP_PATH,
   XAI_OAUTH_API_BASE,
@@ -76,11 +77,23 @@ interface PendingResponse {
   cleanup(): void;
 }
 
+/**
+ * A sign-in the provider asked for.
+ *
+ * `explicit` records whether the profile came from an entry the user named.
+ * A profile that a workspace binding selected was not chosen by the user, so
+ * signing in to it must not change the account the user selected.
+ */
+export interface SignInRequest {
+  readonly profile: string;
+  readonly explicit: boolean;
+}
+
 export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel> {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private readonly usageEmitter = new vscode.EventEmitter<{ profile: string; usage: GrokUsageSnapshot }>();
   private readonly activeProfileEmitter = new vscode.EventEmitter<string>();
-  private readonly signInRequestedEmitter = new vscode.EventEmitter<string>();
+  private readonly signInRequestedEmitter = new vscode.EventEmitter<SignInRequest>();
   readonly onDidChangeLanguageModelChatInformation = this.changeEmitter.event;
   readonly onDidChangeUsage = this.usageEmitter.event;
   readonly onDidChangeActiveProfile = this.activeProfileEmitter.event;
@@ -89,6 +102,8 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   private readonly lastModelRefreshAt = new Map<string, number>();
   private readonly usageByProfile = new Map<string, GrokUsageSnapshot>();
   private activeProfile: string;
+  /** Profile pinned by the current workspace, if any. Not persisted. */
+  private boundProfile: string | undefined;
   private readonly metadata: ModelsDevMetadata;
   private readonly autoSignInGate = new AutoSignInGate();
   private modelCacheGeneration = 0;
@@ -141,13 +156,55 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return this.activeProfile;
   }
 
+  /**
+   * The profile that requests actually use.
+   *
+   * A workspace binding pins the current repository to an account, so it wins
+   * over the account the user last selected. The binding is resolved on
+   * demand rather than cached, so a management command never acts on a
+   * stale account after the binding changed. It is never persisted, so a
+   * repository cannot repoint the account used in an unrelated workspace.
+   *
+   * This is the routing account. Usage and management use
+   * {@link getActiveProfile}, which is the account the user selected.
+   */
+  getEffectiveProfile(): string {
+    return this.workspaceBindingProfile() ?? this.activeProfile;
+  }
+
+  /**
+   * The account the current workspace is bound to, if any.
+   *
+   * The binding is derived from the default entry so that one entry's binding
+   * cannot overwrite another's.
+   */
+  private workspaceBindingProfile(): string | undefined {
+    const resolved = resolveWorkspaceProfilesQuietly(DEFAULT_XAI_PROFILE);
+    return resolved.workspace.bound ? resolved.workspace.profile : undefined;
+  }
+
+  /**
+   * Resolves the profile a Manage Language Models entry should use.
+   *
+   * The entry's own profile is the baseline. A workspace binding can pin a
+   * repository to a different account.
+   */
+  private resolveBinding(entryProfile: string): ProfileResolution {
+    const resolved = resolveWorkspaceProfiles(entryProfile);
+    if (this.boundProfile !== this.workspaceBindingProfile()) {
+      this.boundProfile = this.workspaceBindingProfile();
+      this.changeEmitter.fire();
+    }
+    return resolved.entry;
+  }
+
   setActiveProfile(profile: string): void {
     this.activeProfile = normalizeProfileId(profile);
     this.activeProfileEmitter.fire(this.activeProfile);
     this.usageEmitter.fire({ profile: this.activeProfile, usage: this.getUsageSnapshot() });
   }
 
-  getUsageSnapshot(profile = this.activeProfile): GrokUsageSnapshot {
+  getUsageSnapshot(profile = this.getActiveProfile()): GrokUsageSnapshot {
     return this.usageByProfile.get(profile) ?? {};
   }
 
@@ -155,11 +212,11 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return Object.fromEntries(this.usageByProfile);
   }
 
-  clearUsage(profile = this.activeProfile): void {
+  clearUsage(profile = this.getActiveProfile()): void {
     this.setAndEmitUsage(profile, {});
   }
 
-  async refreshModels(profile = this.activeProfile): Promise<string[]> {
+  async refreshModels(profile = this.getActiveProfile()): Promise<string[]> {
     const models = await this.discoverModels(profile);
     this.changeEmitter.fire();
     return models.map((model) => model.id);
@@ -194,14 +251,19 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     token: vscode.CancellationToken,
   ): Promise<GrokModel[]> {
     if (token.isCancellationRequested || !options.configuration) return [];
-    let profile: string;
+    let entryProfile: string;
     try {
-      profile = profileFromConfiguration(options.configuration);
+      entryProfile = profileFromConfiguration(options.configuration);
     } catch (error) {
       const message = messageOf(error);
       this.output.appendLine(`[models] ${message}`);
       if (!options.silent) void vscode.window.showErrorMessage(message);
       return [];
+    }
+    const binding = this.resolveBinding(entryProfile);
+    const profile = binding.profile;
+    if (binding.bound) {
+      this.output.appendLine(`[models] entry "${entryProfile}" bound to profile "${profile}" by ${binding.source} scope`);
     }
     if (!await this.oauth.hasSession(profile)) {
       // Both entry-creation paths (native Add Models and the provisioning
@@ -213,7 +275,9 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       await observeProfile(this.metadataCache, profile, 0);
       if (firstSighting && this.autoSignInGate.shouldStartSignIn(profile)) {
         this.output.appendLine(`[auth] entry for profile "${profile}" added natively; offering sign-in`);
-        this.signInRequestedEmitter.fire(profile);
+        // A profile a workspace binding selected was not chosen by the user,
+        // so signing in to it must not change their selected account.
+        this.signInRequestedEmitter.fire({ profile, explicit: !binding.bound });
       }
       return [];
     }
@@ -379,7 +443,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return estimateChatTokens(value);
   }
 
-  async testConnection(profile = this.activeProfile): Promise<{ model: string; text: string }> {
+  async testConnection(profile = this.getActiveProfile()): Promise<{ model: string; text: string }> {
     const session = await this.oauth.getSession(false, profile);
     const model = pickTestModel(this.modelsFor(profile));
     const response = await fetch(`${XAI_OAUTH_API_BASE}/chat/completions`, {
@@ -408,7 +472,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     return { model, text: body.choices?.[0]?.message?.content?.trim() ?? "(empty response)" };
   }
 
-  async refreshUsage(profile = this.activeProfile): Promise<GrokUsageSnapshot> {
+  async refreshUsage(profile = this.getActiveProfile()): Promise<GrokUsageSnapshot> {
     try {
       await this.discoverModels(profile);
       this.mergeAndEmitUsage(profile, { apiError: undefined, updatedAt: Date.now() });
