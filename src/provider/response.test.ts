@@ -60,3 +60,23 @@ test("supports hosts without thinking parts and retains native token usage", () 
   assert.equal(usage.mimeType, "usage");
   assert.equal(JSON.parse(new TextDecoder().decode(usage.data)).prompt_tokens, 2);
 });
+
+test("usage events during thinking wait for the segment close so deltas stay mergeable", () => {
+  const { output, reporter } = harness();
+  reporter.report({ reasoning: "Son" });
+  reporter.report({ usage: { prompt_tokens: 10, completion_tokens: 4 } });
+  reporter.report({ reasoning: "ar still flags a" });
+  reporter.report({ usage: { prompt_tokens: 20, completion_tokens: 9 } });
+  reporter.report({ reasoning: " regex" });
+  reporter.report({ text: "answer" });
+  reporter.finish();
+  // Copilot Chat merges a thinking delta only when the previous part is a
+  // non-empty thinking part; interleaved usage data parts would split the
+  // reasoning into one bubble per delta.
+  assert.deepEqual(output.map((part) => (part as object).constructor.name),
+    ["ThinkingPart", "ThinkingPart", "ThinkingPart", "ThinkingPart", "DataPart", "DataPart", "TextPart"]);
+  assert.deepEqual(output.slice(0, 3).map((part) => (part as ThinkingPart).value), ["Son", "ar still flags a", " regex"]);
+  assert.deepEqual((output[3] as ThinkingPart).metadata, { vscode_reasoning_done: true });
+  const usage = output.filter((part): part is vscode.LanguageModelDataPart => part instanceof DataPart);
+  assert.deepEqual(usage.map((part) => JSON.parse(new TextDecoder().decode(part.data)).completion_tokens), [4, 9]);
+});
