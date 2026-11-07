@@ -18,7 +18,11 @@ test("reports reasoning before a mixed text delta and closes each segment once",
   const { output, reporter } = harness();
   reporter.report({ reasoning: "plan", text: "answer" });
   reporter.finish();
-  assert.deepEqual(output, [new ThinkingPart("plan"), new ThinkingPart("", "", { vscode_reasoning_done: true }), new TextPart("answer")]);
+  assert.deepEqual(output, [
+    new ThinkingPart("plan", "grok-thinking-request"),
+    new ThinkingPart("", "grok-thinking-request", { vscode_reasoning_done: true }),
+    new TextPart("answer"),
+  ]);
 });
 
 test("closes reasoning before tools, completion, cancellation, or errors", () => {
