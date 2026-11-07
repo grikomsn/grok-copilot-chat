@@ -12,16 +12,20 @@ export class StreamResponseReporter {
   private toolIndex = 0;
   /** Usage events held back while a thinking segment is open, flushed on close. */
   private pendingUsage: Record<string, unknown>[] = [];
+  /** Stable segment id: renderer-side re-id/timing stamping only hits falsy ids. */
+  private readonly segmentId: string;
 
   constructor(
     private readonly progress: vscode.Progress<vscode.LanguageModelResponsePart2>,
     private readonly parts: ResponsePartConstructors,
     private readonly requestId: string,
-  ) {}
+  ) {
+    this.segmentId = `grok-thinking-${requestId}`;
+  }
 
   report(event: ChatStreamEvent): void {
     if (event.reasoning && this.parts.LanguageModelThinkingPart) {
-      this.progress.report(new this.parts.LanguageModelThinkingPart(event.reasoning));
+      this.progress.report(new this.parts.LanguageModelThinkingPart(event.reasoning, this.segmentId));
       this.thinkingOpen = true;
     }
     if (event.text || event.toolCalls?.length || event.finishReason || event.done) this.flushThinking();
@@ -50,7 +54,7 @@ export class StreamResponseReporter {
     if (!this.thinkingOpen) return;
     this.thinkingOpen = false;
     const ThinkingPart = this.parts.LanguageModelThinkingPart;
-    if (ThinkingPart) this.progress.report(new ThinkingPart("", "", { vscode_reasoning_done: true }));
+    if (ThinkingPart) this.progress.report(new ThinkingPart("", this.segmentId, { vscode_reasoning_done: true }));
     for (const usage of this.pendingUsage.splice(0)) this.reportUsage(usage);
   }
 
