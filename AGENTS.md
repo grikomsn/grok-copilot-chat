@@ -5,6 +5,7 @@
 This is a small, strict-TypeScript VS Code extension that exposes xAI Grok as a native Copilot Chat language-model provider. It targets Node.js 22+ and VS Code 1.125+.
 
 - `src/extension.ts`: activation, dependency wiring, and persisted usage state
+- `src/kit/`: shared [copilot-chat-kit](https://github.com/grikomsn/copilot-chat-kit) git submodule (Unicode-safe JSON, errors, retry, request deadlines, SSE and Chat Completions parsing, message conversion, history trimming, response writing, usage payloads, pricing, context tiers, credentials, models.dev snapshots, inline-suggestion shell, VS Code API augmentations). Provider quirks stay outside it and configure it through options
 - `src/commands/`: sign-in, management, diagnostics, connection, model, and usage commands
 - `src/provider.ts`: language-model provider facade, model discovery, request lifecycle, and usage capture
 - `src/provider/`: message conversion and VS Code response projection
@@ -14,7 +15,6 @@ This is a small, strict-TypeScript VS Code extension that exposes xAI Grok as a 
 - `src/transport/`: proxy protocol identity plus Chat Completions and Responses stream dialects
 - `src/tools/`: caller-executed VS Code functions and xAI-hosted tool declarations
 - `src/usage/`: rate-limit, token, cost, subscription, and display helpers
-- `src/vscode/`: proposed VS Code API type augmentations
 - Tests are colocated as `src/**/*.test.ts` using `node:test` and `node:assert/strict`
 - `package.json`: extension manifest, public commands/settings, and scripts
 
@@ -27,6 +27,7 @@ This is a small, strict-TypeScript VS Code extension that exposes xAI Grok as a 
 - Treat OAuth and provider changes as security-sensitive: never log prompts or tokens, never persist credentials outside `SecretStorage`, preserve PKCE/state/nonce and callback validation, and escape external content shown in callback pages or errors.
 - Preserve cancellation and streaming behavior. Do not buffer a response that can be handled incrementally, and retain the single forced token refresh/retry on HTTP 401.
 - Do not commit generated `out/`, source maps, `node_modules/`, or `.vsix` files.
+- `src/kit/` is the shared copilot-chat-kit git submodule. Clone with `--recurse-submodules` (or run `git submodule update --init`). Never edit kit files only here: commit and push the change to the kit repository (inside `src/kit` or in its own checkout), then commit the submodule bump with `git submodule update --remote src/kit`.
 
 ## Validation
 

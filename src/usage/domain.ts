@@ -1,3 +1,5 @@
+import { providerUsagePayload, type ProviderUsagePayload } from "../kit/usage-payload";
+
 export interface LimitBucket {
   limit?: number;
   remaining?: number;
@@ -66,15 +68,6 @@ export interface UsageDisplayRow {
   label: string;
   description: string;
   detail?: string;
-}
-
-export interface ProviderUsagePayload {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  prompt_tokens_details?: { cached_tokens: number };
-  completion_tokens_details?: { reasoning_tokens: number };
-  copilotCredits?: number;
 }
 
 export function parseApiRateLimitHeaders(
@@ -172,16 +165,10 @@ export function recordApiRequestUsage(
   return mergeUsageSnapshot(current, { lastRequest, tracked, updatedAt: recordedAt });
 }
 
-export function toProviderUsagePayload(raw: Record<string, unknown>): ProviderUsagePayload {
-  const usage = normalizeApiUsage(raw);
-  return {
-    ...(usage.promptTokens === undefined ? {} : { prompt_tokens: usage.promptTokens }),
-    ...(usage.completionTokens === undefined ? {} : { completion_tokens: usage.completionTokens }),
-    ...(usage.totalTokens === undefined ? {} : { total_tokens: usage.totalTokens }),
-    ...(usage.cachedTokens === undefined ? {} : { prompt_tokens_details: { cached_tokens: usage.cachedTokens } }),
-    ...(usage.reasoningTokens === undefined ? {} : { completion_tokens_details: { reasoning_tokens: usage.reasoningTokens } }),
-    ...(usage.costUsdTicks === undefined ? {} : { copilotCredits: usage.costUsdTicks / 100_000_000 }),
-  };
+/** The `"usage"` data part for one response; xAI reports cost in 1e-10 USD ticks. */
+export function toProviderUsagePayload(raw: Record<string, unknown>): ProviderUsagePayload | undefined {
+  const { costUsdTicks, ...usage } = normalizeApiUsage(raw);
+  return providerUsagePayload({ ...usage, ...(costUsdTicks === undefined ? {} : { costUsd: costUsdTicks / 100_000_000 }) });
 }
 
 export function hasUsageLimits(snapshot: GrokUsageSnapshot): boolean {

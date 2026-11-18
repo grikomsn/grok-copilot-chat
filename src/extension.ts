@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { messageOf } from "./errors";
+import { messageOf } from "./kit/errors";
 import { XaiOAuth } from "./auth/oauth";
 import { GrokProvider } from "./provider";
 import { registerCommands } from "./commands/commands";

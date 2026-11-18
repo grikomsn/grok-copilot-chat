@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import test from "node:test";
 import type * as vscode from "vscode";
-import { stringifyWellFormedJson } from "../transport/unicode";
+import { messageText } from "../kit/messages";
+import { stringifyWellFormedJson } from "../kit/unicode";
 
 class TextPart { constructor(readonly value: string) {} }
 class ToolCallPart { constructor(readonly callId: string, readonly name: string, readonly input: object) {} }
@@ -29,8 +30,15 @@ function message(content: unknown[], role = 1): vscode.LanguageModelChatRequestM
   return { role, content, name: undefined } as unknown as vscode.LanguageModelChatRequestMessage;
 }
 
+const classes = {
+  LanguageModelTextPart: TextPart,
+  LanguageModelToolCallPart: ToolCallPart,
+  LanguageModelToolResultPart: ToolResultPart,
+  LanguageModelDataPart: DataPart,
+  LanguageModelChatMessageRole: { User: 1, Assistant: 2 },
+} as unknown as Parameters<typeof messageText>[1];
+
 for (const [name, convert] of [
-  ["Chat Completions", messages.convertChatMessage],
   ["Responses", messages.convertResponsesMessage],
 ] as const) {
   test(`${name} preserves split emoji in text and nested tool results`, () => {
@@ -44,7 +52,7 @@ for (const [name, convert] of [
     assert.match(encoded, /file 🚀\\n📋/);
     assert.match(encoded, /data:image\/png;base64,AAEC/);
     assert.doesNotMatch(encoded, /\\u[dD][89a-fA-F][0-9a-fA-F]{2}/);
-    assert.match(messages.messageToText(input), /status 🟢\nfile 🚀\n📋/);
+    assert.match(messageText(input, classes), /status 🟢\nfile 🚀\n📋/);
   });
 
   test(`${name} replaces lone surrogates inside embedded tool-call arguments`, () => {
@@ -52,7 +60,7 @@ for (const [name, convert] of [
     const encoded = stringifyWellFormedJson(converted);
     assert.doesNotMatch(encoded, /\\u[dD][89a-fA-F][0-9a-fA-F]{2}/);
     const item = converted[0];
-    const argumentsJson = "tool_calls" in item ? item.tool_calls![0].function.arguments : "arguments" in item ? item.arguments : "";
+    const argumentsJson = "arguments" in item ? item.arguments : "";
     assert.deepEqual(JSON.parse(argumentsJson), { text: "�", nested: ["🟢", "�"] });
   });
 }

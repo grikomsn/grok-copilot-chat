@@ -1,16 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  applyReasoningEffort,
-  applyResponsesReasoningEffort,
-  buildModelConfigurationSchema,
-  contextSizeOptions,
-  modelEffortSpec,
-  resolveContextCap,
-  resolveContextSize,
-  resolveReasoningEffort,
-  resolveWebSearch,
-} from "./options";
+import { applyReasoningEffort, applyResponsesReasoningEffort, buildModelConfigurationSchema, modelEffortSpec, resolveReasoningEffort, resolveWebSearch } from "./options";
+import { contextSizeOptions, resolveContextCap, resolveContextSize } from "../kit/context-size";
 
 test("exposes model-specific Grok reasoning levels", () => {
   assert.deepEqual(modelEffortSpec("grok-4.7"), {
