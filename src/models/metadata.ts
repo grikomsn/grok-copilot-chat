@@ -1,9 +1,9 @@
 import type { ModelCost } from "./pricing";
 
-export const MODELS_DEV_API_URL = "https://models.dev/api.json";
+import { MODELS_DEV_API_URL, MODELS_DEV_CACHE_TTL_MS, RemoteSnapshot, type SnapshotStore } from "../kit/remote-snapshot";
+
+export { MODELS_DEV_API_URL, MODELS_DEV_CACHE_TTL_MS };
 export const MODELS_DEV_CACHE_KEY = "grokCopilot.modelsDevMetadata.v1";
-export const MODELS_DEV_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const MODELS_DEV_TIMEOUT_MS = 15_000;
 
 export interface ModelsDevModelMetadata {
   readonly id: string;
@@ -24,12 +24,7 @@ export interface ModelsDevSnapshot {
   readonly models: Readonly<Record<string, ModelsDevModelMetadata>>;
 }
 
-export interface MetadataCache {
-  get<T>(key: string): T | undefined;
-  update(key: string, value: unknown): PromiseLike<void>;
-}
-
-type Fetch = typeof fetch;
+export type MetadataCache = SnapshotStore;
 
 export function normalizeModelsDevSnapshot(payload: unknown, fetchedAt: number): ModelsDevSnapshot {
   const provider = asRecord(asRecord(payload)?.xai);
@@ -56,54 +51,22 @@ export function parseCachedModelsDevSnapshot(value: unknown): ModelsDevSnapshot 
   return { fetchedAt: snapshot.fetchedAt, models };
 }
 
-export class ModelsDevMetadata {
-  private snapshot: ModelsDevSnapshot | undefined;
-  private refreshPromise: Promise<ModelsDevSnapshot> | undefined;
-  private loadedCache = false;
-
-  constructor(
-    private readonly cache: MetadataCache,
-    private readonly fetchImpl: Fetch = fetch,
-    private readonly now: () => number = () => Date.now(),
-  ) {}
-
-  async getOrRefresh(): Promise<ModelsDevSnapshot> {
-    this.loadCache();
-    if (!this.snapshot) return this.refresh();
-    if (this.now() - this.snapshot.fetchedAt >= MODELS_DEV_CACHE_TTL_MS) void this.refresh();
-    return this.snapshot;
-  }
-
-  async refresh(): Promise<ModelsDevSnapshot> {
-    this.loadCache();
-    if (this.refreshPromise) return this.refreshPromise;
-    this.refreshPromise = this.fetchAndCache().finally(() => { this.refreshPromise = undefined; });
-    return this.refreshPromise;
+/** models.dev enrichment with the kit's persisted stale-while-revalidate lifecycle. */
+export class ModelsDevMetadata extends RemoteSnapshot<ModelsDevSnapshot> {
+  constructor(cache: MetadataCache, fetchImpl: typeof fetch = fetch, now: () => number = () => Date.now()) {
+    super({
+      cacheKey: MODELS_DEV_CACHE_KEY,
+      store: cache,
+      fetch: fetchImpl,
+      now,
+      normalize: normalizeModelsDevSnapshot,
+      parseCached: parseCachedModelsDevSnapshot,
+      empty: () => ({ fetchedAt: 0, models: {} }),
+    });
   }
 
   getModel(id: string): ModelsDevModelMetadata | undefined {
-    this.loadCache();
-    return this.snapshot?.models[id];
-  }
-
-  private async fetchAndCache(): Promise<ModelsDevSnapshot> {
-    try {
-      const response = await this.fetchImpl(MODELS_DEV_API_URL, { headers: { accept: "application/json" }, signal: timeoutSignal() });
-      if (!response.ok) throw new Error(`Models.dev metadata request failed: ${response.status}`);
-      const next = normalizeModelsDevSnapshot(await response.json(), this.now());
-      this.snapshot = next;
-      try { await this.cache.update(MODELS_DEV_CACHE_KEY, next); }
-      catch { /* A cache write must not hide a successful refresh. */ }
-      return next;
-    } catch {
-      return this.snapshot ?? { fetchedAt: 0, models: {} };
-    }
-  }
-
-  private loadCache(): void {
-    if (this.loadedCache) return;
-    this.loadedCache = true;
-    this.snapshot = parseCachedModelsDevSnapshot(this.cache.get<unknown>(MODELS_DEV_CACHE_KEY));
+    return this.current?.models[id];
   }
 }
 
@@ -173,7 +136,6 @@ function parseCost(value: unknown): ModelCost | undefined {
   return { input, output, ...(cacheRead === undefined ? {} : { cacheRead }) };
 }
 
-function timeoutSignal(): AbortSignal | undefined { return typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS) : undefined; }
 function asRecord(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function stringValue(value: unknown): string | undefined { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
 function optionalString(value: unknown): string | undefined { return value === undefined ? undefined : stringValue(value); }

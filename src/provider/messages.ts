@@ -1,61 +1,6 @@
 import * as vscode from "vscode";
-import { joinTextParts, stringifyWellFormedJson } from "../transport/unicode";
+import { joinTextParts, stringifyWellFormedJson } from "../kit/unicode";
 import type { ResponsesInputContentPart, ResponsesInputItem } from "../transport/responses";
-
-export interface ChatMessage {
-  role: "user" | "assistant" | "tool";
-  content: string | null | ChatContentPart[];
-  tool_calls?: ChatToolCall[];
-  tool_call_id?: string;
-}
-
-interface ChatContentPart {
-  type: "text" | "image_url";
-  text?: string;
-  image_url?: { url: string };
-}
-
-interface ChatToolCall {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
-}
-
-export function convertChatMessage(message: vscode.LanguageModelChatRequestMessage): ChatMessage[] {
-  const role = message.role === vscode.LanguageModelChatMessageRole.Assistant ? "assistant" : "user";
-  const text: string[] = [];
-  const images: ChatContentPart[] = [];
-  const toolCalls: ChatToolCall[] = [];
-  const results: ChatMessage[] = [];
-
-  for (const part of message.content) {
-    if (part instanceof vscode.LanguageModelTextPart) text.push(part.value);
-    else if (part instanceof vscode.LanguageModelToolCallPart) {
-      toolCalls.push({
-        id: part.callId,
-        type: "function",
-        function: { name: part.name, arguments: stringifyWellFormedJson(part.input ?? {}) },
-      });
-    } else if (part instanceof vscode.LanguageModelToolResultPart) {
-      results.push({ role: "tool", tool_call_id: part.callId, content: joinTextParts(part.content.map(inputPartText)) });
-    } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith("image/")) {
-      images.push({
-        type: "image_url",
-        image_url: { url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString("base64")}` },
-      });
-    }
-  }
-
-  const textValue = joinTextParts(text);
-  const content: string | ChatContentPart[] = images.length
-    ? [...(textValue ? [{ type: "text" as const, text: textValue }] : []), ...images]
-    : textValue;
-  if (role === "assistant" && toolCalls.length) {
-    return [{ role, content: content || null, tool_calls: toolCalls }];
-  }
-  if (results.length) return content ? [{ role, content }, ...results] : results;
-  return [{ role, content }];
-}
 
 export function convertResponsesMessage(message: vscode.LanguageModelChatRequestMessage): ResponsesInputItem[] {
   const role = message.role === vscode.LanguageModelChatMessageRole.Assistant ? "assistant" : "user";
@@ -98,22 +43,8 @@ export function convertResponsesMessage(message: vscode.LanguageModelChatRequest
   return items;
 }
 
-export function normalizeChatMessages(messages: ChatMessage[]): ChatMessage[] {
-  const filtered = messages.filter((message) =>
-    Boolean(message.tool_calls?.length || message.tool_call_id || (typeof message.content === "string" ? message.content : message.content?.length)),
-  );
-  if (filtered[0]?.role === "assistant") {
-    filtered.unshift({ role: "user", content: "Continue from the previous assistant response." });
-  }
-  return filtered.length ? filtered : [{ role: "user", content: "" }];
-}
-
 export function normalizeResponsesInput(input: ResponsesInputItem[]): ResponsesInputItem[] {
   return input.length ? input : [{ type: "message", role: "user", content: "" }];
-}
-
-export function messageToText(message: vscode.LanguageModelChatRequestMessage): string {
-  return joinTextParts(message.content.map(inputPartText));
 }
 
 function inputPartText(part: vscode.LanguageModelInputPart | unknown): string {

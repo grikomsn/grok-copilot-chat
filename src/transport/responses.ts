@@ -1,6 +1,6 @@
 import { applyResponsesReasoningEffort, type ReasoningEffort } from "../models/options";
 import { createPromptCacheKey } from "../provider/prompt-cache";
-import { completeToolCall, type ChatStreamEvent, type PendingToolCall } from "./chat-completions";
+import { completeToolCall, type ChatStreamEvent, type PendingToolCall } from "../kit/chat-completions";
 
 export interface ResponsesFunctionTool {
   type: "function";
@@ -252,7 +252,7 @@ export class ResponsesStreamParser {
       return undefined;
     }
     let completed: PendingToolCall;
-    try { completed = completeToolCall(tool); } catch (error) {
+    try { completed = completeToolCall(tool, "xAI"); } catch (error) {
       if (final) throw error;
       return undefined;
     }

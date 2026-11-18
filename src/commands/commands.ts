@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { messageOf } from "../errors";
+import { messageOf } from "../kit/errors";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth } from "../auth/oauth";
 import { GrokProvider } from "../provider";
 import { formatUsageRows } from "../usage/domain";

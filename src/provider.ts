@@ -1,15 +1,20 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import { estimateChatTokens } from "./provider/token-count";
-import { withContextOverflowHint } from "./provider/context-error";
-import { stringifyWellFormedJson } from "./transport/unicode";
-import { messageOf } from "./errors";
+import { ChatCompletionStreamParser, validateStreamCompletion } from "./kit/chat-completions";
+import { contextSizeOptions, resolveContextCap, resolveContextSize } from "./kit/context-size";
+import { httpError, messageOf, withContextOverflowHint } from "./kit/errors";
+import { trimChatHistoryToFit, trimResponsesInputToFit } from "./kit/history-trim";
+import { convertChatMessages } from "./kit/messages";
+import { modelPricingFields } from "./kit/pricing";
+import { ephemeralSnapshotStore } from "./kit/remote-snapshot";
+import { ChatEventReporter, ResponseWriter } from "./kit/response-writer";
+import { fetchWithRetry, gatewayOrRateLimitStatuses } from "./kit/retry";
+import { readTextStream, RequestDeadline } from "./kit/stream";
+import { estimateChatTokens } from "./kit/token-count";
+import { stringifyWellFormedJson } from "./kit/unicode";
 import {
   applyReasoningEffort,
   buildModelConfigurationSchema,
-  contextSizeOptions,
-  resolveContextCap,
-  resolveContextSize,
   resolveReasoningEffort,
   resolveWebSearch,
   type ReasoningEffort,
@@ -26,7 +31,7 @@ import {
   type DiscoveredModel,
 } from "./models/catalog";
 import { ModelsDevMetadata, type MetadataCache } from "./models/metadata";
-import { grokModelCost, modelPricingFields } from "./models/pricing";
+import { grokModelCost } from "./models/pricing";
 import { DEFAULT_XAI_PROFILE, normalizeProfileId, XaiOAuth, type OAuthSession } from "./auth/oauth";
 import { AutoSignInGate } from "./auth/auto-signin";
 import { activeProfileFromState, profileFromConfiguration, profileQualifiedModelId } from "./provider-profile";
@@ -37,21 +42,12 @@ import {
   XAI_SUBSCRIPTION_BILLING_PATH,
   buildXaiOAuthHeaders,
 } from "./transport/protocol";
-import { ChatCompletionStreamParser, validateStreamCompletion } from "./transport/chat-completions";
 import {
   buildResponsesFunctionTool,
   buildResponsesRequest,
   ResponsesStreamParser,
 } from "./transport/responses";
-import {
-  convertChatMessage,
-  convertResponsesMessage,
-  messageToText,
-  normalizeChatMessages,
-  normalizeResponsesInput,
-} from "./provider/messages";
-import { trimChatHistoryToFit, trimResponsesInputToFit } from "./provider/history-trim";
-import { StreamResponseReporter } from "./provider/response";
+import { convertResponsesMessage, normalizeResponsesInput } from "./provider/messages";
 import { hasObservedProfile, observeProfile, readProfileJournal, reconcileProfiles } from "./provider-journal";
 import { createChatPromptCacheHeaders } from "./provider/prompt-cache";
 import { buildChatFunctionTool, toolMode } from "./tools/client-tools";
@@ -72,10 +68,6 @@ export interface GrokModel extends vscode.LanguageModelChatInformation {
   profile: string;
 }
 
-interface PendingResponse {
-  response: Response;
-  cleanup(): void;
-}
 
 /**
  * A sign-in the provider asked for.
@@ -120,7 +112,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     private readonly oauth: XaiOAuth,
     private readonly output: vscode.OutputChannel,
     initialUsage: Readonly<Record<string, GrokUsageSnapshot>> = {},
-    private readonly metadataCache: MetadataCache = memoryMetadataCache(),
+    private readonly metadataCache: MetadataCache = ephemeralSnapshotStore(),
     initialActiveProfile: unknown = DEFAULT_XAI_PROFILE,
   ) {
     for (const [profile, usage] of Object.entries(initialUsage)) this.usageByProfile.set(profile, usage);
@@ -234,7 +226,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       }),
     });
     this.captureApiLimits(response.headers, "models", profile);
-    if (!response.ok) throw await apiError("Unable to list xAI models", response);
+    if (!response.ok) throw await httpError("Unable to list xAI models", response);
     const discovered = parseDiscoveredModels(await response.json());
     const metadata = await this.metadata.getOrRefresh();
     if (generation !== this.modelCacheGeneration) throw new Error("xAI accounts changed during model discovery; refresh models again");
@@ -369,69 +361,46 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         toolMode(options.toolMode),
       )
       : buildRequest(model.rawModelId, messages, options, reasoningEffort, maxOutputTokens, contextCap);
-    let session = await this.oauth.getSession(false, model.profile);
-    let pending = await this.sendRequest(session, requestBody, token, webSearch ? "responses" : "chat/completions");
-    if (pending.response.status === 401) {
-      pending.cleanup();
-      session = await this.oauth.getSession(true, model.profile);
-      pending = await this.sendRequest(session, requestBody, token, webSearch ? "responses" : "chat/completions");
-    }
-    const response = pending.response;
-    this.captureApiLimits(response.headers, `${webSearch ? "responses" : "chat"}:${model.rawModelId}`, model.profile);
+    const endpoint = webSearch ? "responses" : "chat/completions";
+    const timeoutSeconds = Math.max(10, this.configuration.get("requestTimeoutSeconds", 600));
+    const idleTimeoutSeconds = Math.max(10, this.configuration.get("streamIdleTimeoutSeconds", 120));
+    const deadline = new RequestDeadline({ totalMs: timeoutSeconds * 1000, idleMs: idleTimeoutSeconds * 1000, cancellation: token });
+    let finalUsage: Record<string, unknown> | undefined;
+    const reporter = new ChatEventReporter(new ResponseWriter(progress, vscode, "grok", randomUUID()), {
+      label: "xAI",
+      toUsagePayload: toProviderUsagePayload,
+      onUsage: (usage) => { finalUsage = usage; },
+    });
     try {
-      if (!response.ok) throw await apiError(`xAI request failed for ${model.rawModelId}`, response);
+      let session = await this.oauth.getSession(false, model.profile);
+      let response = await this.sendRequest(session, requestBody, deadline.signal, endpoint);
+      if (response.status === 401) {
+        // One forced refresh: the access token may have expired mid-session.
+        await response.body?.cancel().catch(() => undefined);
+        session = await this.oauth.getSession(true, model.profile);
+        response = await this.sendRequest(session, requestBody, deadline.signal, endpoint);
+      }
+      this.captureApiLimits(response.headers, `${webSearch ? "responses" : "chat"}:${model.rawModelId}`, model.profile);
+      if (!response.ok) throw await httpError(`xAI request failed for ${model.rawModelId}`, response);
       if (!response.body) throw new Error("xAI returned an empty response stream");
-
       if (this.debugLogging) {
         this.output.appendLine(`[request] model=${model.rawModelId} effort=${reasoningEffort ?? "model-default"} webSearch=${webSearch} initiator=${options.requestInitiator ?? "unknown"}`);
       }
-
-      const parser = webSearch ? new ResponsesStreamParser() : new ChatCompletionStreamParser();
-      let finalUsage: Record<string, unknown> | undefined;
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const reporter = new StreamResponseReporter(progress, vscode, randomUUID());
-      const cancellation = token.onCancellationRequested(() => { void reader.cancel().catch(() => undefined); });
-      let finished = false;
-      try {
-        while (true) {
-          if (token.isCancellationRequested) {
-            await reader.cancel();
-            return;
-          }
-          const result = await reader.read();
-          if (token.isCancellationRequested) return;
-          if (result.done) break;
-          for (const event of parser.push(decoder.decode(result.value, { stream: true }))) {
-            reporter.report(event);
-            if (event.usage) finalUsage = event.usage;
-          }
-        }
-        for (const event of parser.push(decoder.decode())) {
-          reporter.report(event);
-          if (event.usage) finalUsage = event.usage;
-        }
-        for (const event of parser.finish()) {
-          reporter.report(event);
-          if (event.usage) finalUsage = event.usage;
-        }
-        validateStreamCompletion(parser.finishReason);
-        finished = true;
-      } catch (error) {
-        if (token.isCancellationRequested) return;
-        if (isAbortError(error)) throw new Error("xAI response stream timed out before completing");
-        throw error;
-      } finally {
-        reporter.finish();
-        cancellation.dispose();
-        if (!finished) await reader.cancel().catch(() => undefined);
-        reader.releaseLock();
-      }
+      const parser = webSearch ? new ResponsesStreamParser() : new ChatCompletionStreamParser({ label: "xAI" });
+      const completed = await readTextStream(response.body, (text) => {
+        for (const event of parser.push(text)) reporter.report(event);
+      }, { deadline, isCancelled: () => token.isCancellationRequested });
+      if (!completed) return;
+      for (const event of parser.finish()) reporter.report(event);
+      if (parser instanceof ChatCompletionStreamParser) parser.validateCompletion(requestBody.tool_choice === "required");
+      else validateStreamCompletion("xAI", parser.finishReason);
       if (finalUsage) this.captureRequestUsage(finalUsage, model.rawModelId, model.profile);
     } catch (error) {
-      throw withContextOverflowHint(error);
+      if (token.isCancellationRequested) return;
+      throw deadline.timeoutError(`xAI request for ${model.rawModelId}`) ?? withContextOverflowHint(error);
     } finally {
-      pending.cleanup();
+      reporter.finish();
+      deadline.dispose();
     }
   }
 
@@ -463,7 +432,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
       }),
     });
     this.captureApiLimits(response.headers, `test:${model}`, profile);
-    if (!response.ok) throw await apiError("xAI connection test failed", response);
+    if (!response.ok) throw await httpError("xAI connection test failed", response);
     const body = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
       usage?: Record<string, unknown>;
@@ -528,7 +497,7 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
         }),
       });
     }
-    if (!response.ok) throw await apiError(`Unable to read xAI account usage at ${path}`, response);
+    if (!response.ok) throw await httpError(`Unable to read xAI account usage at ${path}`, response);
     return response.json();
   }
 
@@ -549,49 +518,29 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
     this.setAndEmitUsage(profile, next);
   }
 
-  private async sendRequest(
+  /** Sends one inference request, retrying only pre-stream transient failures. */
+  private sendRequest(
     session: OAuthSession,
     requestBody: Record<string, unknown>,
-    cancellation: vscode.CancellationToken,
-    endpoint: "chat/completions" | "responses" = "chat/completions",
-  ): Promise<PendingResponse> {
-    const controller = new AbortController();
-    if (cancellation.isCancellationRequested) controller.abort();
-    const timeoutSeconds = Math.max(
-      10,
-      this.configuration.get("requestTimeoutSeconds", 600),
-    );
-    const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
-    const listener = cancellation.onCancellationRequested(() => controller.abort());
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      clearTimeout(timeout);
-      listener.dispose();
-      controller.abort();
+    signal: AbortSignal,
+    endpoint: "chat/completions" | "responses",
+  ): Promise<Response> {
+    const body = stringifyWellFormedJson(requestBody);
+    const headers = {
+      ...buildXaiOAuthHeaders({
+        accessToken: session.accessToken,
+        userId: session.userId,
+        email: session.email,
+        contentType: "application/json",
+        accept: "text/event-stream",
+      }),
+      ...(endpoint === "chat/completions" ? createChatPromptCacheHeaders(requestBody) : {}),
     };
-    try {
-      const response = await fetch(`${XAI_OAUTH_API_BASE}/${endpoint}`, {
-        method: "POST",
-        headers: {
-          ...buildXaiOAuthHeaders({
-            accessToken: session.accessToken,
-            userId: session.userId,
-            email: session.email,
-            contentType: "application/json",
-            accept: "text/event-stream",
-          }),
-          ...(endpoint === "chat/completions" ? createChatPromptCacheHeaders(requestBody) : {}),
-        },
-        body: stringifyWellFormedJson(requestBody),
-        signal: controller.signal,
-      });
-      return { response, cleanup };
-    } catch (error) {
-      cleanup();
-      throw error;
-    }
+    return fetchWithRetry(() => fetch(`${XAI_OAUTH_API_BASE}/${endpoint}`, { method: "POST", headers, body, signal }), {
+      isTransientStatus: gatewayOrRateLimitStatuses,
+      signal,
+      log: (message) => this.output.appendLine(message),
+    });
   }
 
   private captureApiLimits(headers: Headers, source: string, profile: string): void {
@@ -631,13 +580,6 @@ export class GrokProvider implements vscode.LanguageModelChatProvider<GrokModel>
   }
 }
 
-function memoryMetadataCache(): MetadataCache {
-  const values = new Map<string, unknown>();
-  return {
-    get<T>(key: string): T | undefined { return values.get(key) as T | undefined; },
-    async update(key: string, value: unknown): Promise<void> { values.set(key, value); },
-  };
-}
 
 function buildRequest(
   model: string,
@@ -651,7 +593,8 @@ function buildRequest(
   const maxTokens = typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
     ? Math.floor(maxOutputTokens)
     : configuredMaxOutput;
-  const converted = normalizeChatMessages(messages.flatMap(convertChatMessage));
+  // xAI accepts images on every chat model; tool-result images reach it too.
+  const converted = convertChatMessages(messages, vscode, { label: "xAI", imageInput: true });
   const requestMessages = contextCapTokens === undefined
     ? converted
     : [...trimChatHistoryToFit(converted, contextCapTokens).items];
@@ -674,18 +617,4 @@ function formatModelName(id: string): string {
   return id.split("-").map((part) => part === "grok" ? "Grok" : part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
-async function apiError(prefix: string, response: Response): Promise<Error> {
-  const text = (await response.text().catch(() => "")).trim();
-  let detail = text;
-  try {
-    const json = JSON.parse(text) as { error?: { message?: string } | string };
-    detail = typeof json.error === "string" ? json.error : json.error?.message ?? text;
-  } catch {
-    // Use the response text as-is.
-  }
-  return new Error(`${prefix} (HTTP ${response.status})${detail ? `: ${detail.slice(0, 1000)}` : ""}`);
-}
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}

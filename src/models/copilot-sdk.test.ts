@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyReasoningEffort, applyResponsesReasoningEffort, buildModelConfigurationSchema, contextSizeOptions, resolveReasoningEffort } from "./options";
+import { applyReasoningEffort, applyResponsesReasoningEffort, buildModelConfigurationSchema, resolveReasoningEffort } from "./options";
+import { contextSizeOptions } from "../kit/context-size";
 
 // Mirrors the BYOK schema key and the Copilot launcher's accepted tiers in VS Code 1.141.
 const SDK_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);

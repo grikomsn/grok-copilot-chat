@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const vscode = require("vscode");
 const { GrokProvider } = require("../../out/provider");
 const { XaiOAuth, XAI_SESSION_SECRET } = require("../../out/auth/oauth");
-const { StreamResponseReporter } = require("../../out/provider/response");
+const { ChatEventReporter, ResponseWriter } = require("../../out/kit/response-writer");
 
 async function run() {
   const source = new vscode.CancellationTokenSource();
@@ -101,7 +101,7 @@ async function run() {
     assert.equal((await provider.provideLanguageModelChatInformation({ silent: true, configuration: { profile: "work" } }, source.token)).length, 0);
     assert.deepEqual(await provider.reconcileAccounts(), { entriesWithoutSessions: ["work"], accountsWithoutObservedEntries: [] });
     const generated = [];
-    const reporter = new StreamResponseReporter({ report: (part) => generated.push(part) }, vscode, "native");
+    const reporter = new ChatEventReporter(new ResponseWriter({ report: (part) => generated.push(part) }, vscode, "grok", "native"), { label: "xAI", toUsagePayload: () => undefined });
     reporter.report({ toolCalls: [{ id: "", name: "probe", arguments: "{}" }, { id: "", name: "probe", arguments: "{}" }] });
     assert.equal(new Set(generated.map((part) => part.callId)).size, 2);
     await validateWorkspaceBinding(provider, oauth, source);
